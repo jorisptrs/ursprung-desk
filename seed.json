@@ -96,6 +96,7 @@
       "people": ["B.", "Claude"], "practice": "music", "provenance": "curator", "visibility": "public",
       "excerpt": { "form": "words", "text": "fugue scoring — no use" }
     } },
+  { "e": "thread", "night": 3, "from": "a-002", "to": "a-012", "why": "the quest it failed to advance" },
   { "e": "deposit", "night": 3,
     "artifact": {
       "id": "a-013", "media": "note", "kind": "fieldnotes",

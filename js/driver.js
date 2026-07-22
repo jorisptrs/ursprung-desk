@@ -3,19 +3,34 @@
 // it never fabricates events (D26). Key map is D53's.
 
 const INTENTS = {
-  ' ': 'step',
-  s: 'step',
   r: 'replay',
   0: 'reset',
   e: 'end',
   l: 'live-toggle',
 };
 
+const SCRUBS = { s: 'step', ArrowRight: 'step', ArrowLeft: 'back' }; // held, these rush (D78); space steps nowhere (D103)
+
 export function attachDriver(dispatch) {
+  // The scrub timer is the driver's own — OS key-repeat can be slow or off.
+  let scrub = null;
+  const stopScrub = () => {
+    if (!scrub) return;
+    clearInterval(scrub);
+    scrub = null;
+  };
   addEventListener('keydown', (event) => {
-    if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return; // cmd+R stays reload
+    if (event.metaKey || event.ctrlKey || event.altKey) return; // cmd+R stays reload
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
     if (key === ' ') event.preventDefault(); // Safari scrolls the viewport regardless of overflow
+    if (SCRUBS[key]) {
+      if (event.repeat) return;
+      stopScrub();
+      dispatch(SCRUBS[key]);
+      scrub = setInterval(() => dispatch(SCRUBS[key]), 70);
+      return;
+    }
+    if (event.repeat) return;
     if (key === 'f') {
       if (document.fullscreenElement) document.exitFullscreen();
       else document.documentElement.requestFullscreen().catch(() => {});
@@ -23,6 +38,10 @@ export function attachDriver(dispatch) {
     }
     const intent = INTENTS[key];
     if (intent) dispatch(intent);
+  });
+  addEventListener('keyup', (event) => {
+    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    if (SCRUBS[key]) stopScrub();
   });
 }
 
@@ -33,11 +52,12 @@ const GESTURES = [
   ['tap a card', 'flip it over', false],
   ['tap again', 'flip it back', false],
   ['play / visit ↗', 'open the work behind a card', false],
-  ['hold the table', 'keep dealing', false],
+  ['hold the table', 'rush through the cards', false],
 ];
 
 const RIG_KEYS = [
-  ['space', 'next card', true],
+  ['→ / s', 'next card — hold to rush', true],
+  ['←', 'take cards back — hold to rush', true],
   ['r', 'replay from the start', true],
   ['0', 'clear the table', true],
   ['e', 'show the full table', true],
@@ -47,7 +67,10 @@ const RIG_KEYS = [
 ];
 
 const VISITOR_KEYS = [
-  ['space', 'next card — hold to keep dealing', true],
+  ['→', 'next card — hold to rush', true],
+  ['←', 'take cards back — hold to rush', true],
+  ['r', 'clear the table', true],
+  ['enter / space', 'add your work', true], // a held space still rushes ahead (D99)
   ['?', 'this help', true],
 ];
 
@@ -62,12 +85,15 @@ export function attachHelper(field, { withKeys = false, deal = null } = {}) {
   const addRow = (key, label, isKbd) => {
     const row = document.createElement('div');
     row.className = 'keys__row';
-    const k = document.createElement('span');
-    k.className = isKbd ? 'keys__k keys__k--kbd' : 'keys__k';
-    k.textContent = key;
+    if (key != null) {
+      const k = document.createElement('span');
+      k.className = isKbd ? 'keys__k keys__k--kbd' : 'keys__k';
+      k.textContent = key;
+      row.append(k);
+    }
     const what = document.createElement('span');
     what.textContent = label;
-    row.append(k, what);
+    row.append(what);
     panel.append(row);
     return { row, what };
   };
@@ -88,6 +114,7 @@ export function attachHelper(field, { withKeys = false, deal = null } = {}) {
   }
 
   for (const [key, label, kbd] of GESTURES) addRow(key, label, kbd);
+  if (!withKeys) addRow('+', 'add your work', false); // the bottom-left door (D91) — named here, lived there
 
   const close = () => panel.classList.remove('open');
   const toggle = () => {
@@ -100,6 +127,7 @@ export function attachHelper(field, { withKeys = false, deal = null } = {}) {
   });
   panel.addEventListener('click', close);
   addEventListener('keydown', (event) => {
+    if (event.target instanceof Element && event.target.closest('input, textarea, select, .sheet')) return; // typing on the sheet is typing
     if (event.key === '?') toggle();
     else if (event.key === 'Escape') close();
   });

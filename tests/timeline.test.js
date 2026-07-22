@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   initialState, reduce, pacing, compressedEventMs,
-  LIVE_MS, PASS_MS, REST_MS, BEAT_MS, EVENT_MIN_MS, EVENT_MAX_MS,
+  PASS_MS, REST_MS, BEAT_MS, EVENT_MIN_MS, EVENT_MAX_MS,
 } from '../js/timeline.js';
 
 const N = 5;
@@ -58,16 +58,42 @@ test('step: deals one in held, snaps the in-flight card elsewhere (D78)', () => 
   assert.equal(reduce(compressed, 'step', N).state, compressed);
 });
 
-test('holding space feeds one card ahead; releasing lets the last one land (D78)', () => {
-  const oneInFlight = { ...initialState({ after: 'live' }), mode: 'held', cursor: 1, target: 2 };
-  let r = reduce(oneInFlight, 'feed', N);
-  assert.equal(r.state.target, 3, 'one queued behind the one in flight');
-  assert.deepEqual(r.effects, ['drain']);
-  assert.equal(reduce(r.state, 'feed', N).state, r.state, 'never more than one ahead');
-  r = reduce(r.state, 'hand-release', N);
-  assert.equal(r.state.target, 2, 'release: the card in flight lands, nothing more');
-  const outside = { ...oneInFlight, mode: 'compressed' };
-  assert.equal(reduce(outside, 'feed', N).state, outside, 'feeding is manual-mode only');
+test('the scrub is plain steps: spamming step walks the stream, snapping each wait (D78)', () => {
+  let s = { ...initialState({ after: 'live' }), mode: 'held', cursor: 0, target: 0 };
+  for (let i = 1; i <= 3; i++) {
+    const r = reduce(s, 'step', N);
+    assert.equal(r.state.target, i);
+    assert.deepEqual(r.effects, ['finish', 'drain'], 'each press snaps the pending wait and launches the next');
+    s = reduce(r.state, 'played', N).state;
+  }
+  assert.equal(s.cursor, 3);
+});
+
+test('back is navigation: idle steps down, a pending card retreats, zero is a no-op (D78)', () => {
+  const idle = { ...initialState({ after: 'live' }), mode: 'held', cursor: 3, target: 3 };
+  let r = reduce(idle, 'back', N);
+  assert.deepEqual([r.state.cursor, r.state.target], [2, 2]);
+  assert.deepEqual(r.effects, ['sync'], 'instant — the leaving card is simply gone (D87)');
+  const midFlight = { ...initialState({ after: 'live' }), mode: 'held', cursor: 2, target: 3 };
+  r = reduce(midFlight, 'back', N);
+  assert.deepEqual([r.state.cursor, r.state.target], [2, 2], 'the pending card retreats, nothing settled is taken');
+  assert.deepEqual(r.effects, ['sync']);
+  const zero = { ...initialState({ after: 'live' }), mode: 'held', cursor: 0, target: 0 };
+  assert.equal(reduce(zero, 'back', N).state, zero, 'nothing laid, nothing to take back');
+  assert.equal(reduce(zero, 'back', N).effects.length, 0);
+});
+
+test('back in auto still pauses first; the next press steps back (D78)', () => {
+  const midPass = { ...initialState({ after: 'live' }), mode: 'compressed', cursor: 3, target: N };
+  let r = reduce(midPass, 'back', N);
+  assert.deepEqual([r.state.mode, r.state.target], ['held', 4], 'first ← stops right here, like d');
+  assert.deepEqual(r.effects, ['finish']);
+  const atRestLive = { ...initialState({ after: 'live' }), mode: 'live', cursor: N, target: N };
+  r = reduce(atRestLive, 'back', N);
+  assert.deepEqual([r.state.mode, r.state.target], ['held', N], 'at live rest ← only drops to manual');
+  r = reduce(r.state, 'back', N);
+  assert.deepEqual([r.state.cursor, r.state.target], [N - 1, N - 1], 'the second press takes the card');
+  assert.deepEqual(r.effects, ['sync']);
 });
 
 test('d is pause/play: pause holds in place mid-deal, resume deals the rest (D78)', () => {
@@ -123,13 +149,17 @@ test('appended: live plays it as it lands; held and compressed ignore until thei
   assert.deepEqual(r.effects, ['drain']);
   const held = initialState({ after: 'held' });
   assert.equal(reduce(held, 'appended', N + 1).state, held);
-  // a deposit landing mid-pass is picked up when the pass drains into live
+  // a deposit landing mid-pass is picked up when the pass drains into live —
+  // and drains then, not on the next poke
   let mid = { ...initialState({ after: 'live' }), mode: 'compressed', cursor: N, target: N };
   mid = reduce(mid, 'appended', N + 1).state;
   assert.equal(mid.target, N, 'compressed target is fixed for the take');
-  const rested = reduce(mid, 'drained', N + 1).state;
-  assert.equal(rested.mode, 'live');
-  assert.equal(rested.target, N + 1);
+  const rested = reduce(mid, 'drained', N + 1);
+  assert.equal(rested.state.mode, 'live');
+  assert.equal(rested.state.target, N + 1);
+  assert.deepEqual(rested.effects, ['drain'], 'resting into live plays what landed during the take');
+  const quiet = reduce({ ...initialState({ after: 'live' }), mode: 'compressed', cursor: N, target: N }, 'drained', N);
+  assert.deepEqual(quiet.effects, [], 'nothing waiting → nothing launches');
 });
 
 test('hide-flush mid-pass jumps to settled in the rest mode; no-op elsewhere', () => {
@@ -153,17 +183,14 @@ test('budget-first pacing: total pass time lands inside the D12 window as the se
   }
 });
 
-test('pacing shapes: rest before the first event, beats between nights, stepped cadence', () => {
+test('pacing shapes: rest before the first event, beats between nights, cadence as wait', () => {
   const compressed = { ...initialState({ after: 'live' }), mode: 'compressed' };
   const per = compressedEventMs(fakeEvents);
   assert.equal(pacing(compressed, fakeEvents, 0).delayBefore, REST_MS);
   assert.equal(pacing(compressed, fakeEvents, 1).delayBefore, 0);
   assert.equal(pacing(compressed, fakeEvents, 2).delayBefore, BEAT_MS, 'night 0→1');
-  assert.equal(pacing(compressed, fakeEvents, 1).duration, per);
-  const stepped = { ...compressed, stepped: true };
-  const p = pacing(stepped, fakeEvents, 2);
-  assert.deepEqual([p.duration, p.wait, p.delayBefore], [0, per, BEAT_MS]);
+  assert.equal(pacing(compressed, fakeEvents, 1).wait, per, 'the cadence lives in the hold after the placement');
   const live = { ...initialState({ after: 'live' }), mode: 'live' };
-  assert.equal(pacing(live, fakeEvents, 0).duration, LIVE_MS);
+  assert.deepEqual(pacing(live, fakeEvents, 0), { delayBefore: 0, wait: 0 }, 'outside the pass a placement is immediate (D87)');
   assert.ok(PASS_MS >= 12000 && PASS_MS <= 18000, 'budget itself sits in the D12 window');
 });

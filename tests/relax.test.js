@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createStream } from '../js/stream.js';
-import { fold, pastEnd, eventTime, cardRect, captionStrip } from '../js/fold.js';
+import { fold, pastEnd, eventTime, cardRect, captionStrip, clearance } from '../js/fold.js';
 import { specimenEvents } from '../js/specimens.js';
 
 const seed = JSON.parse(readFileSync(new URL('../seed.json', import.meta.url), 'utf8'));
@@ -24,40 +24,39 @@ function captionViolations(state) {
   const cards = state.cards; // stream order = z-order: later lies atop earlier
   for (let j = 1; j < cards.length; j++) {
     for (let i = 0; i < j; i++) {
-      // the fieldnotes pile may cover its own older notes — that is the register (§9)
-      if (cards[i].artifact.kind === 'fieldnotes' && cards[j].artifact.kind === 'fieldnotes') continue;
+      // Claude's corner pile may cover its own — field notes and failures alike (D67 amended)
+      const inPile = (c) => c.artifact.kind === 'fieldnotes' || c.artifact.kind === 'failure';
+      if (inPile(cards[i]) && inPile(cards[j])) continue;
       if (intersects(cardRect(cards[j]), captionStrip(cards[i]))) out.push(`${cards[j].id} covers ${cards[i].id}`);
     }
   }
   return out;
 }
 
-test('legibility floor holds on the seed at every boundary, post-drift', () => {
+test('legibility floor holds on the seed at every boundary', () => {
   const events = loaded(seed.events);
   for (let k = 0; k < events.length; k++) {
     assert.deepEqual(captionViolations(fold(events, eventTime(k))), [], `violated at boundary ${k}`);
   }
 });
 
-test('legibility floor holds on the crowded specimen field at every boundary, post-drift', () => {
+test('legibility floor holds on the crowded specimen field at every boundary', () => {
   const events = loaded(specimenEvents);
   for (let k = 0; k < events.length; k++) {
     assert.deepEqual(captionViolations(fold(events, eventTime(k))), [], `violated at boundary ${k}`);
   }
 });
 
-test('continuity bound holds on the crowded specimen field too', () => {
+test('placements are final on the crowded specimen field too (D87)', () => {
   const events = loaded(specimenEvents);
-  let maxDelta = 0;
   for (let k = 1; k < events.length; k++) {
     const prev = new Map(fold(events, eventTime(k - 1)).cards.map((c) => [c.id, c]));
     for (const c of fold(events, eventTime(k)).cards) {
       const p = prev.get(c.id);
       if (!p) continue;
-      maxDelta = Math.max(maxDelta, Math.abs(c.x - p.x), Math.abs(c.y - p.y));
+      assert.deepEqual([c.x, c.y], [p.x, p.y], `${c.id} moved at boundary ${k}`);
     }
   }
-  assert.ok(maxDelta < 0.03, `laid card moved ${maxDelta} between boundaries`);
 });
 
 test('specimens validate and cover every media, every kind, threads, both withheld fallbacks', () => {
@@ -76,6 +75,22 @@ test('specimens validate and cover every media, every kind, threads, both withhe
   assert.ok(artifacts.some((a) => a.media === 'code' && !a.excerpt.text), 'missing withheld code specimen');
   assert.ok(artifacts.some((a) => a.detail?.experience?.mode === 'play'), 'missing play-experience specimen (D72)');
   assert.ok(artifacts.some((a) => a.detail?.experience?.mode === 'visit'), 'missing visit-experience specimen (D72)');
+});
+
+test('the table fills evenly (D89): no image-card-sized hole remains at rest', () => {
+  // measured −0.009 at pastEnd on the seed; ≤ 0.05 pins "filled" with margin
+  const events = loaded(seed.events);
+  const state = fold(events, pastEnd(events));
+  const probe = { artifact: { media: 'image' }, scale: 1.15, x: 0, y: 0 };
+  let maxHole = -Infinity;
+  for (let x = 0.08; x <= 0.92; x += 0.0125) {
+    for (let y = 0.1; y <= 0.9; y += 0.02) {
+      probe.x = x;
+      probe.y = y;
+      maxHole = Math.max(maxHole, clearance(cardRect(probe), state.cards));
+    }
+  }
+  assert.ok(maxHole <= 0.05, `an image-sized hole survives the full stream (${maxHole.toFixed(3)})`);
 });
 
 test('specimen fold is deterministic too', () => {
