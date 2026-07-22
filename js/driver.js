@@ -33,6 +33,7 @@ const GESTURES = [
   ['tap a card', 'flip it over', false],
   ['tap again', 'flip it back', false],
   ['play / visit ↗', 'open the work behind a card', false],
+  ['hold the table', 'keep dealing', false],
 ];
 
 const RIG_KEYS = [
