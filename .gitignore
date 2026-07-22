@@ -1,0 +1,6 @@
+.DS_Store
+node_modules/
+drop/
+
+# private context, not for the public repo (budget figures, named invitees)
+*.pdf

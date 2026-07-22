@@ -1,0 +1,274 @@
+/* The palette of candlelight and paper — never the palette of a dashboard (§4).
+   Values are v1 placeholders until the polish pass (D36). */
+
+:root {
+  --room: #0c0a08;          /* the unlit table beyond the pool */
+  --field-hi: #1c1712;
+  --field: #16120e;
+  --field-lo: #100d0a;
+  --parchment: #e8dcc4;
+  --ink: #2b2418;
+  --ink-muted: #6f6350;
+  --ashen: #d3cfc7;         /* the failure register */
+  --ashen-ink: #504d47;
+  --amber: #c49a58;         /* threads, later */
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--room);
+  font-family: "Iowan Old Style", Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  color: var(--ink);
+}
+
+/* The pool of light: inset so the room frames it, soft radial falloff (D37).
+   container-type lets cards size themselves in cqmin — the laid table re-flows
+   on resize with no JS; mid-flight pixel deltas self-correct at landing. */
+#field {
+  position: absolute;
+  inset: 5%;
+  container-type: size;
+  background: radial-gradient(115% 90% at 50% 45%, var(--field-hi) 0%, var(--field) 58%, var(--field-lo) 100%);
+  border-radius: 12px;
+  box-shadow: 0 0 70px 18px rgba(200, 160, 95, 0.045); /* faint spill, as a projector leaks */
+}
+
+/* the rig hides the pointer — nothing screen-like touches the wood (D64) */
+html.rig, html.rig body { cursor: none; }
+
+/* ---- threads: string under paper, drawn between card edges (D51) ---- */
+
+.threads {
+  position: absolute;
+  inset: 0;
+  z-index: 0; /* cards start at 1 */
+  pointer-events: none;
+}
+
+.thread {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px; /* scaleX carries the length — all compositor, no layout */
+  height: 1.5px;
+  border-radius: 1px;
+  background: rgba(196, 154, 88, 0.7); /* --amber, quiet */
+  transform-origin: 0 50%;
+  will-change: transform, opacity;
+}
+
+/* ---- card ---- */
+
+.card {
+  position: absolute;
+  background: var(--parchment);
+  padding: 0;
+  perspective: 900px; /* depth for the pivot's turn */
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 7px 18px rgba(0, 0, 0, 0.3); /* contact shadow: laid object, not printed rectangle (D39) */
+  will-change: transform, opacity; /* stay composited: no AA snap when motion starts */
+}
+
+/* ---- the flip: the pivot turns, the card carries light and shadow (D73) ----
+   opacity and shadow sit OUTSIDE the pivot — inside they'd flatten the 3D
+   context and the front would render mirrored instead of the back. */
+
+.card__pivot {
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.card__front,
+.card__back {
+  backface-visibility: hidden;
+}
+
+.card__front {
+  padding: 0.85em 0.9em; /* the card's old padding, moved into the face */
+}
+
+.card__back {
+  position: absolute;
+  inset: 0;
+  transform: rotateY(180deg);
+  background: #ded1b6; /* the sheet's reverse */
+  border-radius: inherit;
+  padding: 0.8em 0.9em;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+}
+
+.kind--failure .card__back { background: #c9c5bd; }
+
+.back__title { font-size: 0.78em; letter-spacing: 0.01em; }
+
+.back__door {
+  font-size: 0.75em;
+  letter-spacing: 0.06em;
+  color: #6f5a33;
+  border-bottom: 1.5px solid rgba(196, 154, 88, 0.85); /* a thread, run under the one word that answers a touch */
+  padding-bottom: 0.12em;
+  width: fit-content;
+}
+
+.back__line {
+  font-size: 0.68em;
+  line-height: 1.5;
+  color: var(--ink-muted);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(43, 36, 24, 0.22);
+  width: fit-content;
+}
+
+.back__note {
+  font-size: 0.68em;
+  line-height: 1.45;
+  color: var(--ink-muted);
+}
+
+.back__player {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+/* ---- the ? on the table (D77, amended): tappable by any visitor ---- */
+
+.keys-btn {
+  position: absolute; /* inside the pool, its quietest corner */
+  right: 1.6%;
+  bottom: 2%;
+  font-size: max(2.8cqmin, 19px);
+  color: rgba(240, 235, 224, 0.6); /* warm white — findable, not glaring */
+  user-select: none;
+  z-index: 890;
+}
+
+.keys__k--kbd { /* keyboard keys wear chips; gesture words stay plain */
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(210, 190, 150, 0.25);
+  border-radius: 4px;
+  padding: 0.05em 0.5em;
+}
+
+.keys__action { /* tappable actions wear underlines, like the doors on card backs */
+  border-bottom: 1.5px solid rgba(196, 154, 88, 0.85);
+  padding-bottom: 0.1em;
+}
+
+.keys {
+  position: fixed;
+  right: 3%;
+  bottom: 5.5%;
+  display: none;
+  min-width: 15em;
+  background: rgba(12, 10, 8, 0.95);
+  border: 1px solid rgba(210, 190, 150, 0.12);
+  border-radius: 8px;
+  padding: 0.9em 1.2em;
+  color: rgba(232, 220, 196, 0.78);
+  font-size: 13px;
+  line-height: 2;
+  z-index: 901;
+}
+
+.keys.open { display: block; }
+
+.keys__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.6em;
+}
+
+.keys__k {
+  color: rgba(196, 154, 88, 0.9);
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.card img {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.card__title {
+  margin-top: 0.55em;
+  font-size: 0.92em;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
+}
+
+.card__caption {
+  margin-top: 0.3em;
+  font-size: 0.7em;
+  line-height: 1.35;
+  color: var(--ink-muted);
+  letter-spacing: 0.02em;
+}
+
+/* traces */
+
+.trace--sentence {
+  font-size: 0.98em;
+  line-height: 1.45;
+}
+
+.trace--words {
+  font-size: 1.02em;
+  line-height: 1.4;
+}
+
+.trace--lines { /* code: a few real lines */
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.7em;
+  line-height: 1.5;
+  white-space: pre;
+  overflow: hidden;
+  margin: 0;
+}
+
+/* withheld surfaces (D6) */
+
+.trace--ruled {
+  height: 4.2em;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 1.05em,
+    rgba(43, 36, 24, 0.14) 1.05em,
+    rgba(43, 36, 24, 0.14) calc(1.05em + 1px)
+  );
+}
+
+.trace--dashes {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.7em;
+  line-height: 1.5;
+  color: rgba(43, 36, 24, 0.28);
+  white-space: pre;
+}
+
+/* the fold's linework may run nearly full-bleed (§5) */
+.card--fold .card__front { padding: 0.35em; }
+.card--fold .card__title, .card--fold .card__caption { padding: 0 0.55em 0.35em; }
+
+/* the failure register: ashen, with its own dignity (§3) */
+.kind--failure {
+  background: var(--ashen);
+  color: var(--ashen-ink);
+}
+.kind--failure .card__caption { color: rgba(80, 77, 71, 0.75); }
