@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>the desk — add your work</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="desk.css">
+</head>
+<body class="deposit-body">
+  <script type="module">
+    // The QR target (D79): the same sheet, standing alone. Its lays reach any
+    // table tab open in this browser; the castle's LAN store later stands
+    // behind the same sink.
+    import { openSheet, broadcastSink } from './js/deposit.js';
+    openSheet({ mode: 'page', container: document.body, sink: broadcastSink() });
+  </script>
+</body>
+</html>

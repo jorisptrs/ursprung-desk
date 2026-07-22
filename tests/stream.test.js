@@ -83,9 +83,10 @@ test('rejects a duplicate id', () => {
   assert.throws(() => s.append(deposit()), /duplicate id/);
 });
 
-test('rejects a deposit without practice (D17)', () => {
+test('practice is optional at the door, but never an empty word (D17 amended)', () => {
   const s = createStream();
-  assert.throws(() => s.append(deposit({ practice: undefined })), /practice/);
+  s.append(deposit({ practice: undefined }));
+  assert.throws(() => s.append(deposit({ id: 'a-002', practice: '' })), /practice/);
 });
 
 test('rejects retirement of an unknown artifact', () => {
