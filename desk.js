@@ -105,17 +105,13 @@ async function main() {
   });
   stream.onAppend(() => tl.dispatch('appended', events().length));
 
-  // The flip (D73): a tap on a backed card turns it, through the same queue as
-  // arrivals. Backless cards stay silent (D11); the opening pass finishes first.
+  // The flip (D73): a tap on a backed card turns it at any moment — mid-deal it
+  // simply takes its turn in the queue between arrivals (D13's original letter:
+  // arrivals wait for flips and vice versa). Backless cards stay silent (D11).
   field.addEventListener('click', (event) => {
-    if (tl.state.mode === 'compressed') return;
     if (event.target.closest('a')) return; // shelved links behave as links
     const cardEl = event.target.closest('.card');
-    if (!cardEl?.dataset.id) {
-      // an empty-table tap = Space: next card in manual, skip-ahead mid-deal (D78)
-      if (!rig) tl.dispatch('step', events().length);
-      return;
-    }
+    if (!cardEl?.dataset.id) return; // empty table is pointer territory (below)
     const doorEl = event.target.closest('[data-door]');
     if (doorEl) {
       view.tapDoor(cardEl.dataset.id, doorEl);
@@ -124,6 +120,24 @@ async function main() {
     if (!cardEl.classList.contains('card--backed')) return;
     queue.push({ run: view.flipJob(cardEl.dataset.id), maxMs: 1800 }); // exchange + slack
   });
+
+  // The empty table is Space made touchable (D78): press = next card (skip-ahead
+  // mid-deal), hold = keep dealing in manual, release = the last card lands.
+  let holdFeed = null;
+  const releaseHold = () => {
+    if (!holdFeed) return;
+    clearInterval(holdFeed);
+    holdFeed = null;
+    tl.dispatch('hand-release', events().length);
+  };
+  field.addEventListener('pointerdown', (event) => {
+    if (rig || event.button !== 0) return;
+    if (event.target.closest('.card') || event.target.closest('a') || event.target.closest('.keys-btn')) return;
+    tl.dispatch('step', events().length);
+    holdFeed = setInterval(() => tl.dispatch('feed', events().length), 300);
+  });
+  addEventListener('pointerup', releaseHold);
+  addEventListener('pointercancel', releaseHold);
 
   // The ? on the table, from the start (D77): plain help for every visitor,
   // keys where keys exist, and on the deployed page the deal control (D78) —

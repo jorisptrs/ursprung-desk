@@ -33,6 +33,7 @@ body {
   position: absolute;
   inset: 5%;
   container-type: size;
+  touch-action: manipulation; /* no double-tap zoom lag on the table */
   background: radial-gradient(115% 90% at 50% 45%, var(--field-hi) 0%, var(--field) 58%, var(--field-lo) 100%);
   border-radius: 12px;
   box-shadow: 0 0 70px 18px rgba(200, 160, 95, 0.045); /* faint spill, as a projector leaks */
