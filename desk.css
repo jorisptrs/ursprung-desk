@@ -69,6 +69,7 @@ html.rig, html.rig body { cursor: none; }
   position: absolute;
   background: var(--parchment);
   padding: 0;
+  overflow-wrap: anywhere; /* an address or an unbroken word wraps rather than running off the paper (D102) */
   perspective: 900px; /* depth for the pivot's turn */
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.5),
@@ -83,6 +84,12 @@ html.rig, html.rig body { cursor: none; }
 .card__pivot {
   transform-style: preserve-3d;
   will-change: transform;
+  /* the pivot is the card's own height, not the front's: `will-change` makes it
+     the back's containing block, so without this a back longer than its front
+     was clipped to the front's height however far the card grew (D93's real
+     hole, found by measurement in D100). Laid cards are unaffected — a percentage
+     height against an auto-height parent resolves to auto. */
+  height: 100%;
 }
 
 .card__front,
@@ -95,19 +102,74 @@ html.rig, html.rig body { cursor: none; }
 }
 
 .card__back {
+  --back-bg: #ded1b6; /* the sheet's reverse */
   position: absolute;
   inset: 0;
   transform: rotateY(180deg);
-  background: #ded1b6; /* the sheet's reverse */
+  background: var(--back-bg);
   border-radius: inherit;
   padding: 0.8em 0.9em;
-  overflow: hidden;
+  overflow: hidden; /* the back is a window; a long arrangement pages (D100) */
+}
+
+.kind--failure .card__back { --back-bg: #c9c5bd; }
+
+.back__flow {
   display: flex;
   flex-direction: column;
   gap: 0.4em;
+  min-width: 0;
 }
 
-.kind--failure .card__back { background: #c9c5bd; }
+/* really too long: the leaves bar stays put and the arrangement scrolls under
+   it — the one place the desk scrolls, and only in a card already in hand (D102) */
+.card__back[data-pages] .back__flow {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  scrollbar-width: none;
+}
+
+.card__back[data-pages] .back__flow::-webkit-scrollbar { display: none; }
+
+/* the leaves' bar: only when the arrangement outgrew the card (D100) */
+.card__back[data-pages] { padding-bottom: 2em; }
+
+.back__nav {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: none;
+  justify-content: center;
+  align-items: baseline;
+  gap: 1em;
+  padding: 0.45em 0 0.55em;
+  background: linear-gradient(to top, var(--back-bg) 72%, transparent); /* the page continues under it, it does not stop at a panel */
+}
+
+.card__back[data-pages] .back__nav { display: flex; }
+
+.back__page {
+  font-size: 0.9em;
+  line-height: 1;
+  color: #6f5a33;
+  border-bottom: 1.5px solid rgba(196, 154, 88, 0.85); /* tappable, as every door on a back */
+  padding: 0 0.25em 0.1em;
+  user-select: none;
+  cursor: pointer;
+}
+
+/* an end is quiet: nothing behind the first leaf, nothing past the last */
+.card__back[data-at="first"] .back__page[data-page="prev"],
+.card__back[data-at="last"] .back__page[data-page="next"] { opacity: 0.22; }
+
+.back__count {
+  font-size: 0.62em;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+}
 
 .back__title { font-size: 0.78em; letter-spacing: 0.01em; }
 
@@ -127,6 +189,7 @@ html.rig, html.rig body { cursor: none; }
   text-decoration: none;
   border-bottom: 1px solid rgba(43, 36, 24, 0.22);
   width: fit-content;
+  max-width: 100%; /* a long address wraps inside the card, never past it (D102) */
 }
 
 .back__note {
@@ -152,6 +215,17 @@ html.rig, html.rig body { cursor: none; }
   bottom: 2%;
   font-size: max(2.8cqmin, 19px);
   color: rgba(240, 235, 224, 0.6); /* warm white — findable, not glaring */
+  user-select: none;
+  z-index: 890;
+}
+
+/* the + in the other quiet corner (D91): the hand door's own door, the ?'s mirror */
+.add-btn {
+  position: absolute;
+  left: 1.6%;
+  bottom: 2%;
+  font-size: max(2.8cqmin, 19px);
+  color: rgba(240, 235, 224, 0.6);
   user-select: none;
   z-index: 890;
 }
@@ -267,9 +341,462 @@ html.rig, html.rig body { cursor: none; }
 .card--fold .card__front { padding: 0.35em; }
 .card--fold .card__title, .card--fold .card__caption { padding: 0 0.55em 0.35em; }
 
-/* the failure register: ashen, with its own dignity (§3) */
+/* the failure register: ashen, with its own dignity (§3); piled in Claude's
+   corner and stamped as its reject (D9 amended) */
 .kind--failure {
   background: var(--ashen);
   color: var(--ashen-ink);
 }
 .kind--failure .card__caption { color: rgba(80, 77, 71, 0.75); }
+
+.kind--failure .card__front { padding-top: 2.1em; } /* the stamp keeps its own band */
+
+/* "failure" printed horizontal; "Claude" stamped diagonally across it, its
+   middle over the word's start — a stamp on print (D9). Set in the wordmark's
+   serif family where the machine has it; nothing is ever fetched (D36). */
+.failure-stamp {
+  position: absolute;
+  top: 1em;
+  right: 0.6em;
+  font-family: 'Copernicus', 'Tiempos Text', 'Iowan Old Style', Palatino, Georgia, serif;
+  font-size: 0.8em;
+  letter-spacing: 0.08em;
+  color: rgba(58, 53, 45, 0.75);
+  pointer-events: none;
+}
+
+.failure-stamp__who {
+  position: absolute;
+  left: -1.5em;
+  top: -0.6em;
+  transform: rotate(-12deg);
+  font-size: 1.15em;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: rgba(58, 53, 45, 0.85);
+}
+
+/* ---- back composition (D88): the maker's arrangement on the sheet's
+   reverse — quiet text, stills of the pieces, plain lines out ---- */
+
+.back__text {
+  font-size: 0.68em;
+  line-height: 1.45;
+  color: var(--ink-muted);
+  white-space: pre-wrap;
+}
+
+.back__piece { margin: 0; max-width: 100%; }
+
+/* a still fills the width it can and is held to part of the card's height, at
+   its own shape — never squashed, never sliced across three leaves (D102);
+   --piece-max comes from the view */
+.back__piece img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: var(--piece-max, none);
+  border-radius: 3px;
+}
+
+.back__caption {
+  font-size: 0.6em;
+  line-height: 1.4;
+  color: var(--ink-muted);
+  margin-top: 0.25em;
+}
+
+/* ---- the sheet: the hand door's one surface (D79/D88) — an editor on dark
+   ground; the desk's button grammar (underline = tappable). Mobile-first:
+   the castle flow is a phone. ---- */
+
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  overflow-y: auto;
+  background: rgba(12, 10, 8, 0.96);
+  color: rgba(232, 220, 196, 0.85);
+  font-size: 15px;
+  line-height: 1.45;
+  cursor: auto;
+}
+
+.sheet--page { /* deposit.html: the page itself, not an overlay */
+  position: static;
+  min-height: 100%;
+  background: var(--room);
+}
+
+.deposit-body { overflow: auto; }
+
+.sheet__panel {
+  max-width: 27em;
+  margin: 0 auto;
+  padding: 1.6em 1.2em 4em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85em;
+}
+
+.sheet__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.2em;
+}
+
+.sheet__heading {
+  font-size: 1.15em;
+  letter-spacing: 0.02em;
+  color: rgba(232, 220, 196, 0.9);
+}
+
+.sheet__action { /* tappable: the amber underline, as on card backs */
+  border-bottom: 1.5px solid rgba(196, 154, 88, 0.85);
+  padding-bottom: 0.1em;
+  width: fit-content;
+  color: rgba(220, 196, 150, 0.9);
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.92em;
+}
+
+/* the meta fields there are (D90): practice and the register, from the start */
+.sheet__meta { align-items: baseline; gap: 1em; }
+
+.sheet__flag { margin-left: auto; font-size: 0.88em; } /* the one flag, at the line's far right (D98) */
+
+.sheet__meta .sheet__field { max-width: 14em; }
+
+.sheet__opt {
+  cursor: pointer;
+  color: rgba(232, 220, 196, 0.5);
+  padding-bottom: 0.1em;
+  user-select: none;
+  border-bottom: 1.5px solid rgba(196, 154, 88, 0.25);
+}
+
+.sheet__opt--on {
+  color: rgba(220, 196, 150, 0.95);
+  border-bottom-color: rgba(196, 154, 88, 0.9);
+}
+
+/* the editor IS the card's back (D95): one parchment sheet you write on —
+   everything renders as it will lie; edit chrome appears only under the cursor */
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45em;
+  min-height: 9em;
+  background: #ded1b6; /* the sheet's reverse */
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 1em 1.1em 1.4em;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 7px 18px rgba(0, 0, 0, 0.3);
+}
+
+/* the editor's lines and widgets on the parchment (D96/D98) */
+
+.desk-title { font-size: 1.15em; letter-spacing: 0.01em; }
+
+.desk-mention { /* a name wears a quiet pill */
+  color: #6f5a33;
+  background: rgba(196, 154, 88, 0.16);
+  border-radius: 4px;
+  padding: 0 0.2em;
+}
+
+.desk-url { /* an address stands out from prose, in the door grammar */
+  color: #6f5a33;
+  border-bottom: 1.5px solid rgba(196, 154, 88, 0.6);
+}
+
+.desk-syntax { color: rgba(43, 36, 24, 0.32); } /* the machinery dims; what you edit stands out */
+
+/* a link renders inline — the address as a quiet door word, the page's own
+   picture beneath when it answered (D98) */
+.desk-linkwrap {
+  display: inline-block;
+  vertical-align: text-top;
+  max-width: 21em;
+  width: 100%;
+  border-left: 2px solid transparent;
+  padding-left: 0.3em;
+}
+
+.desk-linkwrap.desk-front { border-left-color: rgba(196, 154, 88, 0.9); }
+
+.desk-linkline {
+  color: #6f5a33;
+  border-bottom: 1.5px solid rgba(196, 154, 88, 0.85);
+  cursor: pointer;
+}
+
+.desk-linkline--plain {
+  color: var(--ink-muted);
+  border-bottom-color: rgba(43, 36, 24, 0.22);
+}
+
+.link-preview {
+  position: relative;
+  margin-top: 0.35em;
+  max-width: 19em;
+  border: 1px solid rgba(43, 36, 24, 0.14);
+  border-radius: 5px;
+  overflow: hidden;
+  background: rgba(255, 252, 244, 0.35);
+}
+
+.link-preview img { display: block; width: 100%; height: auto; }
+
+.link-preview__title {
+  font-size: 0.75em;
+  line-height: 1.4;
+  color: var(--ink-muted);
+  padding: 0.4em 0.6em;
+}
+
+.link-preview__x {
+  position: absolute;
+  top: 0.2em;
+  right: 0.35em;
+  padding: 0 0.3em;
+  color: rgba(43, 36, 24, 0.6);
+  background: rgba(255, 252, 244, 0.7);
+  border-radius: 3px;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0;
+}
+
+.desk-linkwrap:hover .link-preview__x { opacity: 1; }
+
+.link-preview--loading { /* the page is being asked — a breath, not a spinner */
+  height: 2.4em;
+  animation: desk-breathe 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes desk-breathe {
+  from { background: rgba(255, 252, 244, 0.25); }
+  to { background: rgba(255, 252, 244, 0.7); }
+}
+
+.edit-piece {
+  position: relative;
+  display: inline-block;
+  vertical-align: text-top;
+  padding: 0.15em 1.6em 0.15em 0;
+  cursor: pointer;
+  max-width: 21em;
+  width: 100%;
+  border-left: 2px solid transparent;
+  padding-left: 0.3em;
+}
+
+.edit-piece.desk-front { border-left-color: rgba(196, 154, 88, 0.9); }
+
+.edit-piece__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 3px;
+}
+
+.edit-piece--audio .edit-piece__img { padding: 0.3em 0.5em; }
+
+.edit-piece__caption {
+  color: var(--ink-muted);
+  font-size: 0.8em;
+  padding: 0.2em 0.1em 0;
+}
+
+.edit-piece__name {
+  font-size: 0.8em;
+  color: var(--ink-muted);
+  border-bottom: 1px solid rgba(43, 36, 24, 0.22);
+  overflow-wrap: anywhere;
+}
+
+.edit-piece__x {
+  position: absolute;
+  top: 0.15em;
+  right: 0.4em;
+  padding: 0 0.3em;
+  color: rgba(43, 36, 24, 0.55);
+  cursor: pointer;
+  user-select: none;
+  opacity: 0; /* chrome only where the cursor is (D95) */
+}
+
+.edit-piece:hover .edit-piece__x { opacity: 1; }
+
+/* which face fronts the card is its own mark, quiet until the cursor is near
+   — a click on the piece itself belongs to the pen (D99) */
+.pick-front {
+  position: absolute;
+  bottom: 0.1em;
+  right: 0.4em;
+  font-size: 0.68em;
+  letter-spacing: 0.05em;
+  color: rgba(43, 36, 24, 0.55);
+  border-bottom: 1.5px solid rgba(196, 154, 88, 0.5);
+  cursor: pointer;
+  user-select: none;
+  opacity: 0;
+}
+
+.edit-piece:hover .pick-front,
+.desk-linkwrap:hover .pick-front { opacity: 1; }
+
+.pick-front--on {
+  opacity: 1;
+  color: #6f5a33;
+  border-bottom-color: rgba(196, 154, 88, 0.95);
+}
+
+/* beside the door-word, where the eye already is */
+.desk-linkwrap .pick-front { position: static; margin-left: 0.7em; }
+
+.sheet__field {
+  background: var(--parchment);
+  color: var(--ink);
+  border: none;
+  border-radius: 4px;
+  padding: 0.45em 0.7em;
+  font: inherit;
+  font-size: 0.92em;
+  flex: 1;
+}
+
+.sheet__field::placeholder { color: rgba(43, 36, 24, 0.45); }
+
+.sheet__row { display: flex; gap: 0.7em; align-items: baseline; }
+
+.sheet__label {
+  font-size: 0.78em;
+  letter-spacing: 0.05em;
+  color: rgba(232, 220, 196, 0.5);
+}
+
+/* the two faces, live — exactly what will lie on the table */
+.sheet__previews {
+  display: flex;
+  gap: 1.2em;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 0.9em 0 0.2em;
+  border-top: 1px solid rgba(210, 190, 150, 0.14);
+}
+
+.sheet__face {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5em;
+  min-width: 0;
+}
+
+.sheet__facelabel {
+  font-size: 0.72em;
+  letter-spacing: 0.06em;
+  color: rgba(232, 220, 196, 0.4);
+}
+
+.sheet__card.card {
+  position: relative;
+  left: auto;
+  top: auto;
+  width: 180px;
+  font-size: 13.5px; /* the laid pair: width × 0.075 (D66) */
+  transform: none;
+  color: var(--ink); /* the sheet's light text must not bleed onto the parchment */
+}
+
+/* the back face alone, unmirrored and in flow — the preview is a reading, not a turn */
+.sheet__card--back .card__front { display: none; }
+
+.sheet__card--back .card__back { position: relative; inset: auto; transform: none; }
+
+.sheet__hintcard {
+  border: 1px dashed rgba(210, 190, 150, 0.2);
+  border-radius: 8px;
+  padding: 2.4em 1em;
+  width: 180px;
+  text-align: center;
+  font-size: 0.8em;
+  color: rgba(232, 220, 196, 0.45);
+}
+
+.sheet__status {
+  min-height: 1.3em;
+  font-size: 0.85em;
+  color: rgba(211, 207, 199, 0.85); /* the ashen register speaks the dry lines */
+}
+
+.sheet__actions { display: flex; gap: 1.6em; align-items: baseline; }
+
+.sheet__push { /* the door itself — it stands a little firmer (D99) */
+  font-size: 1.02em;
+  color: rgba(230, 205, 160, 1);
+  border-bottom-color: rgba(196, 154, 88, 1);
+}
+
+.sheet__push--busy { opacity: 0.5; pointer-events: none; }
+
+/* the deck (D99): set-aside cards in person — small, fanned, waiting */
+.sheet__deck {
+  border-top: 1px solid rgba(210, 190, 150, 0.14);
+  padding-top: 0.85em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+}
+
+.sheet__deckhead { align-items: baseline; }
+
+.sheet__pushall { margin-left: auto; font-size: 0.88em; } /* the deck's own door, at the line's far right (D101) */
+
+.sheet__deckfan {
+  display: flex;
+  align-items: flex-start;
+  padding: 0.4em 0 0.5em 0.6em;
+}
+
+.deck-card {
+  position: relative;
+  cursor: pointer;
+  transform: rotate(var(--tilt, 0deg));
+  transition: transform 160ms ease;
+}
+
+.deck-card:not(:first-child) { margin-left: -30px; }
+
+.deck-card:hover { transform: translateY(-6px) rotate(0deg); z-index: 5; }
+
+.deck-card .card {
+  position: relative;
+  width: 92px;
+  font-size: 6.9px; /* the laid ratio (D66), at deck scale */
+  color: var(--ink);
+  pointer-events: none; /* the slot takes the tap; the mini is a picture of the card */
+}
+
+.deck-card__x {
+  position: absolute;
+  top: -0.55em;
+  right: -0.4em;
+  z-index: 6;
+  padding: 0 0.25em;
+  color: rgba(232, 220, 196, 0.75);
+  font-size: 0.95em;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.deck-card:hover .deck-card__x { opacity: 1; }

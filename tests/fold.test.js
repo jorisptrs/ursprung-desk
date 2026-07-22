@@ -73,58 +73,94 @@ test('strata and quest register are pure outputs of the stream', () => {
   assert.ok(quest.opacity < newest.opacity, 'older material sinks in opacity');
 });
 
-test('fieldnotes keep to their corner as a cascading pile and never drift (§9)', () => {
+test("Claude's corner: field notes and failures pile there, cascade, never drift (§9, D67 amended)", () => {
   const s = createStream();
   s.append(makeDeposit('w-1', 0));
   s.append(makeDeposit('n-1', 1, { kind: 'fieldnotes' }));
   s.append(makeDeposit('w-2', 2));
-  s.append(makeDeposit('n-2', 3, { kind: 'fieldnotes' }));
+  s.append(makeDeposit('f-1', 3, { kind: 'failure' }));
   s.append(makeDeposit('w-3', 4));
   const events = s.all();
   const state = fold(events, pastEnd(events));
   const n1 = state.cards.find((c) => c.id === 'n-1');
-  const n2 = state.cards.find((c) => c.id === 'n-2');
-  for (const n of [n1, n2]) {
-    assert.ok(n.x < 0.34 && n.y > 0.7, `fieldnote strayed from the corner: ${n.x}, ${n.y}`);
+  const f1 = state.cards.find((c) => c.id === 'f-1');
+  for (const c of [n1, f1]) {
+    assert.ok(c.x < 0.34 && c.y > 0.7, `pile card strayed from the corner: ${c.x}, ${c.y}`);
   }
-  assert.ok(n2.x > n1.x && n2.y < n1.y, 'the pile cascades up-right, newest on top');
+  assert.ok(f1.x > n1.x && f1.y < n1.y, 'the pile cascades up-right, newest on top');
   // the pile holds still: same position the moment it lands and ever after
   const early = fold(events, eventTime(1)).cards.find((c) => c.id === 'n-1');
   assert.deepEqual([early.x, early.y], [n1.x, n1.y]);
 });
 
-test('continuity (D49): between any two boundaries, a laid card moves less than 0.03', () => {
-  // The bound the motion layer leans on: relax-on-base means a pre-existing
-  // card's between-event delta is exactly one drift increment (analytically
-  // ≤ ~0.0093; 0.03 gives 3× headroom). Checked on the real seed later too —
-  // this synthetic stream is denser than anything the seed pass will author.
+test('placements are final (D87): a laid card never moves between any two boundaries', () => {
   const events = loadSeed();
-  let maxDelta = 0;
   for (let k = 1; k < events.length; k++) {
-    const before = fold(events, eventTime(k - 1));
-    const after = fold(events, eventTime(k));
-    const prev = new Map(before.cards.map((c) => [c.id, c]));
-    for (const c of after.cards) {
+    const prev = new Map(fold(events, eventTime(k - 1)).cards.map((c) => [c.id, c]));
+    for (const c of fold(events, eventTime(k)).cards) {
       const p = prev.get(c.id);
-      if (!p) continue; // the arriving card travels; laid cards may not
-      maxDelta = Math.max(maxDelta, Math.abs(c.x - p.x), Math.abs(c.y - p.y));
+      if (!p) continue; // the arriving card is new; everything laid holds still
+      assert.deepEqual([c.x, c.y, c.rot], [p.x, p.y, p.rot], `${c.id} moved at boundary ${k}`);
     }
   }
-  assert.ok(maxDelta < 0.03, `laid card moved ${maxDelta} between boundaries`);
-  assert.ok(maxDelta > 0, 'drift is alive — something must nudge');
 });
 
-test('cards expose a deterministic placement direction for the entry ray', () => {
+test("normal cards keep out of Claude's corner; margins keep them in the light (D87)", () => {
   const events = loadSeed();
-  const state = fold(events, pastEnd(events));
-  for (const c of state.cards) {
-    assert.equal(typeof c.dir, 'number');
-    assert.ok(c.dir >= 0 && c.dir < Math.PI * 2, `dir ${c.dir} out of range`);
+  for (const c of fold(events, pastEnd(events)).cards) {
+    if (c.artifact.kind === 'fieldnotes' || c.artifact.kind === 'failure') continue;
+    assert.ok(!(c.x < 0.32 && c.y > 0.68), `${c.id} strayed into the corner: ${c.x}, ${c.y}`);
+    assert.ok(c.x >= 0.07 && c.x <= 0.93 && c.y >= 0.09 && c.y <= 0.91, `${c.id} out of the light: ${c.x}, ${c.y}`);
   }
-  assert.deepEqual(
-    state.cards.map((c) => c.dir),
-    fold(events, pastEnd(events)).cards.map((c) => c.dir),
-  );
+});
+
+test('spread (D89): no two non-pile cards land on top of each other, at any boundary', () => {
+  // measured 0.148 canonical on the seed (0.222 on specimens); 0.10 pins it with margin
+  const events = loadSeed();
+  for (let k = 1; k <= events.length; k++) {
+    const cards = fold(events, eventTime(k - 1)).cards
+      .filter((c) => c.artifact.kind !== 'fieldnotes' && c.artifact.kind !== 'failure');
+    for (let i = 0; i < cards.length; i++) {
+      for (let j = i + 1; j < cards.length; j++) {
+        const d = Math.hypot((cards[i].x - cards[j].x) * 1.6, cards[i].y - cards[j].y);
+        assert.ok(d >= 0.1, `${cards[i].id} and ${cards[j].id} clump (${d.toFixed(3)}) at boundary ${k}`);
+      }
+    }
+  }
+});
+
+test('first cards vary by id — the open table is a band, not one argmax (D89)', () => {
+  const spots = ['solo-1', 'solo-2', 'solo-3', 'solo-4'].map((id) => {
+    const s = createStream();
+    s.append(makeDeposit(id, 0));
+    const c = fold(s.all(), pastEnd(s.all())).cards[0];
+    assert.ok(c.x >= 0.07 && c.x <= 0.93 && c.y >= 0.09 && c.y <= 0.91, 'in the light');
+    return c;
+  });
+  let maxPair = 0;
+  for (let i = 0; i < spots.length; i++) {
+    for (let j = i + 1; j < spots.length; j++) {
+      maxPair = Math.max(maxPair, Math.hypot((spots[i].x - spots[j].x) * 1.6, spots[i].y - spots[j].y));
+    }
+  }
+  assert.ok(maxPair >= 0.15, `four ids landed within one small disc (${maxPair.toFixed(3)})`);
+});
+
+test('retire finality (D87/D89): a retirement never re-places a survivor', () => {
+  const s = createStream();
+  for (let i = 1; i <= 3; i++) s.append(makeDeposit(`w-${i}`, 0));
+  s.append({ e: 'retire', night: 1, id: 'w-2' });
+  for (let i = 4; i <= 5; i++) s.append(makeDeposit(`w-${i}`, 1));
+  const events = s.all();
+  const poses = new Map();
+  for (let k = 1; k <= events.length; k++) {
+    for (const c of fold(events, eventTime(k - 1)).cards) {
+      const pose = [c.x, c.y, c.rot];
+      if (poses.has(c.id)) assert.deepEqual(pose, poses.get(c.id), `${c.id} moved at boundary ${k}`);
+      else poses.set(c.id, pose);
+    }
+  }
+  assert.deepEqual([...poses.keys()], ['w-1', 'w-2', 'w-3', 'w-4', 'w-5'], 'every card held one pose for life');
 });
 
 test('thread opacity fades with its dimmer end (D14 concretized)', () => {

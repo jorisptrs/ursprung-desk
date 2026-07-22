@@ -3,10 +3,9 @@
 // Coordinates are normalized 0–1 against the field (D38); the renderer maps to pixels.
 // Overlap is modeled in a canonical table (TABLE_ASPECT) — real desks overlap, so
 // relaxation enforces only one legibility floor: no card's title/caption strip is
-// ever covered by a newer card (D43). Relax runs on base placements and the
-// arrival shoves are replayed after, so an arrival can only ever move a laid
-// card by one schedule increment — the continuity the motion layer tweens
-// against. Final tuning waits for the eye.
+// ever covered by a newer card (D43). Placements are final (D87): a card lands
+// somewhere on the table and never moves again — position carries no meaning
+// beyond "someone put it there"; only Claude's corner pile is a place.
 
 export const SPACING = 1; // table-time units between consecutive events (D25)
 export const eventTime = (i) => (i + 1) * SPACING;
@@ -14,8 +13,6 @@ export const pastEnd = (events) => eventTime(events.length - 1) + SPACING;
 
 export const TABLE_ASPECT = 1.6; // canonical table proportions; the renderer maps 0–1 onto its own rect (Q33 open)
 
-const NUDGE_MAX = 0.03; // lifetime shove budget per card, as a fraction of the field (D1/D41)
-const NUDGE_TAU = 6;
 const STRATUM_DIM = 0.1; // older material sinks per night…
 const STRATUM_FLOOR = 0.7; // …but never below reading light (eye-tuned ×2 2026-07-22)
 const SCALES = { image: 1.15, video: 1.15, fold: 1.05, note: 0.8 }; // §5: subtle, nothing shouts
@@ -46,36 +43,21 @@ export function mulberry32(a) {
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const round4 = (v) => Math.round(v * 10000) / 10000;
 
-function place(artifact) {
+// Claude's studio corner (D67 amended): its work (field notes) and its
+// rejects (failures) pile there, like any studio holds drafts.
+function pilePlace(artifact) {
   const rng = mulberry32(fnv1a(artifact.id));
-  const dir = rng() * Math.PI * 2;
-  let radius = 0.1 + rng() * 0.24; // center-biased scatter
-  let baseOpacity = 1;
-  if (artifact.kind === 'fieldnotes') { // the cartographer's pile keeps to its corner (§9)
-    return {
-      x: 0.155 + (rng() - 0.5) * 0.03,
-      y: 0.84 + (rng() - 0.5) * 0.03,
-      dir,
-      rot: round4((rng() - 0.5) * 7),
-      scale: SCALES[artifact.media] ?? 1,
-      baseOpacity,
-    };
-  }
-  if (artifact.kind === 'quest') { // quests spawn faded and edgeward (§9)
-    radius = 0.32 + rng() * 0.1;
-    baseOpacity = 0.62; // faded, still readable at four strata deep (eye-tuned 2026-07-22)
-  }
   return {
-    x: 0.5 + Math.cos(dir) * radius,
-    y: 0.5 + Math.sin(dir) * radius,
-    dir,
-    rot: round4((rng() - 0.5) * 12),
+    x: 0.155 + (rng() - 0.5) * 0.03,
+    y: 0.84 + (rng() - 0.5) * 0.03,
+    rot: round4((rng() - 0.5) * 7),
     scale: SCALES[artifact.media] ?? 1,
-    baseOpacity,
+    baseOpacity: 1,
   };
 }
 
-const stays = (card) => card.artifact.kind === 'fieldnotes'; // the pile neither drifts nor sweeps
+// Claude's corner pile neither drifts nor sweeps, and may cover its own.
+const stays = (card) => card.artifact.kind === 'fieldnotes' || card.artifact.kind === 'failure';
 
 // ---- overlap model (canonical units: table is TABLE_ASPECT × 1) ----
 
@@ -96,19 +78,75 @@ export function captionStrip(card) {
 const expand = (r, m) => ({ x1: r.x1 - m, y1: r.y1 - m, x2: r.x2 + m, y2: r.y2 + m });
 const intersects = (a, b) => a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
 
-// The nudge schedule: each arrival shoves every earlier card OUTWARD FROM ITS
-// LANDING POINT (D41 amended) — the m-th shove a card feels is the increment of
-// this saturating curve, scaled down with distance from the landing. Vector sum
-// of a card's lifetime shoves ≤ NUDGE_MAX by construction, so every card lives
-// forever inside a disc of that radius around its relaxed base — the bound the
-// floor guarantee leans on.
-const driftAt = (later) => NUDGE_MAX * (1 - Math.exp(-later / NUDGE_TAU));
-const PUSH_SIGMA = 0.22; // distance falloff: the pile parts around what lands in it
+// The pair geometry the settle checks: true shapes, a small safety margin on
+// the protected strip (placements are final — no drift discs, D87).
+const pairStrip = (c) => expand(captionStrip(c), SAFE);
 
-// The shared pair geometry: base shapes inflated by each card's lifetime shove
-// disc. The pile neither shoves nor sweeps; it is exempt against itself only.
-const cardSwept = (c) => expand(cardRect(c), stays(c) ? 0 : NUDGE_MAX);
-const pairStrip = (c) => expand(captionStrip(c), (stays(c) ? 0 : NUDGE_MAX) + SAFE);
+// ---- the berth: each card lands in the largest empty space (D89) ----
+
+const GAP_PITCH = 0.05; // canonical lattice pitch (~390 candidates)
+const GAP_JITTER = 0.03; // per-card lattice offset ≥ pitch/2 — no grid survives
+const GAP_EDGE_W = 0.9; // a wall counts as 0.9 of a neighboring card
+const GAP_BAND_MIN = 0.03; // absolute slack floor on the tie-band
+const GAP_BAND_FRAC = 0.35; // relative slack — what varies the early, open table
+const CORNER_CANON = { x1: 0, y1: 0.66, x2: 0.34 * TABLE_ASPECT, y2: 1 }; // the pile's ground, as an obstacle
+
+// Signed Chebyshev separation between rects: > 0 gap, < 0 overlap depth —
+// negative values keep a total order once the table is crowded.
+const sep = (a, b) => Math.max(
+  Math.max(a.x1 - b.x2, b.x1 - a.x2),
+  Math.max(a.y1 - b.y2, b.y1 - a.y2),
+);
+
+// Bottleneck clearance of a rect against the laid cards, Claude's corner, and
+// the table's own bounds (walls at GAP_EDGE_W). Exported: the tests reuse it.
+export function clearance(rect, cards) {
+  let m = Infinity;
+  for (const c of cards) m = Math.min(m, sep(rect, cardRect(c)));
+  m = Math.min(m, sep(rect, CORNER_CANON));
+  const wall = Math.min(rect.x1, TABLE_ASPECT - rect.x2, rect.y1, 1 - rect.y2);
+  return Math.min(m, GAP_EDGE_W * wall);
+}
+
+// The largest empty space, deterministically: score a jittered lattice of
+// candidate rects, then pick from the near-best band — the relative band is
+// what keeps an open table varied instead of repeating one argmax. Fixed draw
+// order on one salted stream: jx, jy, pick, rot.
+function bestBerth(artifact, obstacles) {
+  const rng = mulberry32(fnv1a(artifact.id + ':gap'));
+  const jx = ((rng() * 2 - 1) * GAP_JITTER) / TABLE_ASPECT;
+  const jy = (rng() * 2 - 1) * GAP_JITTER;
+  const scale = SCALES[artifact.media] ?? 1;
+  const probe = { artifact, scale, x: 0, y: 0 };
+  const candidates = [];
+  let best = -Infinity;
+  const px = GAP_PITCH / TABLE_ASPECT;
+  for (let bx = 0.1; bx <= 0.9 + 1e-9; bx += px) {
+    for (let by = 0.13; by <= 0.87 + 1e-9; by += GAP_PITCH) {
+      const x = bx + jx;
+      const y = by + jy;
+      // jitter first, filter after — nothing ever leaks into the corner
+      if (x < 0.1 || x > 0.9 || y < 0.13 || y > 0.87) continue;
+      if (x < 0.34 && y > 0.66) continue;
+      probe.x = x;
+      probe.y = y;
+      const s = clearance(cardRect(probe), obstacles);
+      candidates.push({ x, y, s });
+      if (s > best) best = s;
+    }
+  }
+  const tol = Math.max(GAP_BAND_MIN, GAP_BAND_FRAC * best);
+  const band = candidates.filter((c) => c.s >= best - tol);
+  const pick = band[Math.floor(rng() * band.length)] ?? { x: 0.5, y: 0.5 };
+  return {
+    x: pick.x,
+    y: pick.y,
+    rot: round4((rng() - 0.5) * 12),
+    scale,
+    // quests stay faded — a register, not a place (eye-tuned 2026-07-22)
+    baseOpacity: artifact.kind === 'quest' ? 0.62 : 1,
+  };
+}
 
 // When gradient descent wedges in a local minimum, scan a deterministic spiral
 // for the nearest free berth — legibility is not negotiable (D43).
@@ -116,7 +154,7 @@ function findClearBerth(cards, j) {
   const a0 = ((fnv1a(cards[j].id + ':berth') % 360) * Math.PI) / 180;
   const clear = (x, y) => {
     const probe = { ...cards[j], x, y };
-    const rect = cardSwept(probe);
+    const rect = cardRect(probe);
     for (let i = 0; i < j; i++) {
       if (stays(cards[i]) && stays(cards[j])) continue;
       if (intersects(rect, pairStrip(cards[i]))) return false;
@@ -140,49 +178,38 @@ function findClearBerth(cards, j) {
   // no free berth at scan resolution — the floor test will say so
 }
 
-// Newer cards give way — the newcomer finds space, the laid table stands (D1).
-// Deterministic: fixed order, fixed steps, hash-derived tie-break. Each move sums
-// the repulsion from every violated strip at once, so a card wedged between two
-// captions escapes sideways instead of ping-ponging pair by pair.
-function relax(cards) {
+// The newcomer gives way to the laid table (D1/D43): gradient descent off
+// every violated strip at once, the spiral berth when descent wedges. One pass
+// suffices — the newcomer settles against cards that are already final.
+function settleOne(cards, j) {
   const hashDir = (id) => {
     const a = ((fnv1a(id) % 360) * Math.PI) / 180;
     return [Math.cos(a), Math.sin(a)];
   };
-  for (let sweep = 0; sweep < 14; sweep++) {
-    let moved = false;
-    for (let j = 1; j < cards.length; j++) {
-      let guard = 0;
-      while (guard++ < 60) {
-        if (guard >= 60) { // descent exhausted with hits remaining
-          findClearBerth(cards, j);
-          break;
-        }
-        const rect = cardSwept(cards[j]);
-        let vx = 0, vy = 0, hits = 0;
-        for (let i = 0; i < j; i++) {
-          if (stays(cards[i]) && stays(cards[j])) continue; // the pile may cover its own older notes
-          const strip = pairStrip(cards[i]);
-          if (!intersects(rect, strip)) continue;
-          hits++;
-          let dx = cards[j].x * TABLE_ASPECT - (strip.x1 + strip.x2) / 2;
-          let dy = cards[j].y - (strip.y1 + strip.y2) / 2;
-          const len = Math.hypot(dx, dy);
-          if (len < 1e-6) [dx, dy] = hashDir(cards[j].id);
-          else { dx /= len; dy /= len; }
-          vx += dx; vy += dy;
-        }
-        if (!hits) break;
-        const vlen = Math.hypot(vx, vy);
-        if (vlen < 1e-6) [vx, vy] = hashDir(cards[j].id); // opposed strips cancel: break the tie
-        else { vx /= vlen; vy /= vlen; }
-        cards[j].x = clamp(cards[j].x + (vx * RELAX_STEP) / TABLE_ASPECT, 0.07, 0.93);
-        cards[j].y = clamp(cards[j].y + vy * RELAX_STEP, 0.09, 0.91);
-        moved = true;
-      }
+  let guard = 0;
+  while (guard++ < 60) {
+    const rect = cardRect(cards[j]);
+    let vx = 0, vy = 0, hits = 0;
+    for (let i = 0; i < j; i++) {
+      if (stays(cards[i]) && stays(cards[j])) continue; // the pile may cover its own older notes
+      const strip = pairStrip(cards[i]);
+      if (!intersects(rect, strip)) continue;
+      hits++;
+      let dx = cards[j].x * TABLE_ASPECT - (strip.x1 + strip.x2) / 2;
+      let dy = cards[j].y - (strip.y1 + strip.y2) / 2;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-6) [dx, dy] = hashDir(cards[j].id);
+      else { dx /= len; dy /= len; }
+      vx += dx; vy += dy;
     }
-    if (!moved) return;
+    if (!hits) return;
+    const vlen = Math.hypot(vx, vy);
+    if (vlen < 1e-6) [vx, vy] = hashDir(cards[j].id); // opposed strips cancel: break the tie
+    else { vx /= vlen; vy /= vlen; }
+    cards[j].x = clamp(cards[j].x + (vx * RELAX_STEP) / TABLE_ASPECT, 0.07, 0.93);
+    cards[j].y = clamp(cards[j].y + vy * RELAX_STEP, 0.09, 0.91);
   }
+  findClearBerth(cards, j); // descent exhausted with hits remaining
 }
 
 export function fold(events, t) {
@@ -191,64 +218,51 @@ export function fold(events, t) {
     if (eventTime(i) <= t) arrived.push({ ev: events[i], i });
   }
 
-  const retired = new Set(arrived.filter((x) => x.ev.e === 'retire').map((x) => x.ev.id));
-  const deposits = arrived.filter((x) => x.ev.e === 'deposit' && !retired.has(x.ev.artifact.id));
-  const maxNight = arrived.reduce((m, x) => Math.max(m, x.ev.night), 0);
-
-  let pileDepth = 0; // fieldnotes cascade up-right, newest on top, stream-order stable
-  const cards = deposits.map(({ ev, i }) => {
+  // One walk in stream order (D87/D89): each deposit lands in the largest
+  // empty space among the cards PRESENT AT THAT MOMENT and settles against
+  // them, then never moves — retires shrink the obstacle set only for cards
+  // that land later, so a retirement never re-places a survivor.
+  const live = [];
+  let pileDepth = 0; // the corner pile cascades up-right; a retired slot stays a slot
+  let maxNight = 0;
+  for (const { ev, i } of arrived) {
+    if (ev.night > maxNight) maxNight = ev.night;
+    if (ev.e === 'retire') {
+      const at = live.findIndex((c) => c.id === ev.id);
+      if (at >= 0) live.splice(at, 1);
+      continue;
+    }
+    if (ev.e !== 'deposit') continue;
     const a = ev.artifact;
-    const g = place(a);
-    if (a.kind === 'fieldnotes') {
+    let g;
+    if (a.kind === 'fieldnotes' || a.kind === 'failure') {
+      g = pilePlace(a);
       g.x += pileDepth * 0.03;
       g.y -= pileDepth * 0.024;
       pileDepth += 1;
+    } else {
+      g = bestBerth(a, live);
     }
-    const stratum = maxNight - ev.night;
-    return {
+    live.push({
       id: a.id,
       artifact: a,
-      x: g.x, // base placement; relax sees only these, drift lands after
+      x: g.x,
       y: g.y,
-      dir: g.dir,
       rot: g.rot,
       scale: g.scale,
-      opacity: round4(g.baseOpacity * Math.max(STRATUM_FLOOR, 1 - stratum * STRATUM_DIM)),
-      stratum,
+      baseOpacity: g.baseOpacity,
       night: ev.night,
       arrivedAt: eventTime(i),
-    };
-  });
-
-  // Relax on base placements: card j's inputs (cards 0..j-1) never change as the
-  // stream grows, so a laid card's between-event motion is exactly one drift
-  // increment (<1% of the field) — nudges stay nudges, never relax lurches.
-  relax(cards);
-
-  // D1/D41 (amended): replay the arrivals in order — each lands at its relaxed
-  // base and shoves every earlier card outward from that point, one schedule
-  // increment scaled by distance. Only deposits shove; the pile holds still.
-  for (let m = 1; m < cards.length; m++) {
-    const drop = cards[m]; // unpushed at its own arrival: this is the landing spot
-    for (let i = 0; i < m; i++) {
-      const c = cards[i];
-      if (stays(c)) continue;
-      let ux = c.x - drop.x;
-      let uy = c.y - drop.y;
-      const dist = Math.hypot(ux, uy);
-      if (dist < 1e-6) {
-        ux = Math.cos(c.dir);
-        uy = Math.sin(c.dir);
-      } else {
-        ux /= dist;
-        uy /= dist;
-      }
-      const shove = (driftAt(m - i) - driftAt(m - i - 1)) * Math.exp(-dist / PUSH_SIGMA);
-      c.x = clamp(c.x + ux * shove, 0.08, 0.92);
-      c.y = clamp(c.y + uy * shove, 0.1, 0.9);
-    }
+    });
+    settleOne(live, live.length - 1);
   }
+
+  const cards = live;
   for (const c of cards) {
+    const stratum = maxNight - c.night;
+    c.stratum = stratum;
+    c.opacity = round4(c.baseOpacity * Math.max(STRATUM_FLOOR, 1 - stratum * STRATUM_DIM));
+    delete c.baseOpacity;
     c.x = round4(c.x);
     c.y = round4(c.y);
   }

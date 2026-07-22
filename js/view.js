@@ -1,34 +1,34 @@
 // The impure half of D38: fold state → objects lying in the light. Settled
 // geometry is fluid CSS (% positions, cqmin sizes), so resize re-flows the laid
-// table with no JS; only threads are px and re-laid on resize. Motion is FLIP
-// overlays via WAAPI: the DOM is written to the settled truth first, animations
-// play from the inverted old pose on top — cancelling anything leaves a correct
-// table. One gesture = one event's full consequence: the arriving card, the
-// nudges and dims it causes (starting as it lands, not before — the pile shifts
-// on contact), a thread drawing itself, a retirement fading out.
+// table with no JS; only threads are px and re-laid on resize. Placements are
+// instant (D87): a card appears where it will lie forever — the table never
+// performs. The one animation left is the flip, a card picked up to read; it
+// runs as a WAAPI overlay on settled truth, so cancelling it leaves a correct
+// table.
 
 import { renderCard, backModel } from './cards.js';
-import { fnv1a, mulberry32, CARD_W, NOMINAL_H } from './fold.js';
+import { CARD_W, NOMINAL_H } from './fold.js';
 import { sleep } from './queue.js';
 
 const EASE = 'cubic-bezier(0.22, 0.9, 0.3, 1)'; // decelerating, like a hand withdrawing
-const SETTLE_EASE = 'cubic-bezier(0.3, 0, 0.22, 1)'; // the pile giving way, no snap
-const NUDGE_AT = 0.65; // consequences of un-located gestures (threads) begin here
-const NUDGE_FROM = 0.3; // the pile starts giving way while the card is still travelling…
-const NUDGE_SPREAD = 0.32; // …reaching the farthest card by ~62% — a slide, not a jolt
 const FLOOR_W = 120; // px pair (width, width·0.075 font) a card never shrinks past —
 // browser zoom and tiny windows change how much table you see, never a card's shape
-const ENTRY_LIT_AT = 0.25; // opacity ramps only while crossing the dark rim
-const ENTRY_ROT = 14; // up to ±7° of over-rotation, resolving on landing
-const MIN_TRAVEL = 0.12; // of the field's short side — placements, never twitches
 const DECODE_MS = 300; // bounded wait for an arriving trace image
 const SETTLE_GRACE_MS = 150; // deadline slack past the gesture's own length
 const FLIP_MS = 520; // the turn of a card picked up to read
-const FLIP_GROW = 1.45; // grown while in hand, aligned inside the pool (D73)
+// A card in hand is a page, not a token (D100): it grows to a reading width —
+// nearly the pool's own on a phone, a comfortable column on the table — and
+// never past the light's edges.
+const READ_W_FRAC = 0.86; // of the pool's width
+const READ_H_FRAC = 0.6; // of its height, so a grown card still lies in the light
+const READ_MAX = 560; // px
+const READ_MIN = 200;
+const OPEN_H_FRAC = 0.86; // the tallest a card in hand may stand
+const PIECE_MAX_FRAC = 0.66; // of that: a still shares its leaf, never takes it whole (D102)
 
 const threadKey = (t) => `${t.from}→${t.to}`;
 
-export function createView(field, { debug = false, rig = false } = {}) {
+export function createView(field, { rig = false } = {}) {
   const cardEls = new Map(); // artifact id → element
   const threadEls = new Map(); // thread key → element
   const active = new Set(); // live Animation objects
@@ -36,6 +36,8 @@ export function createView(field, { debug = false, rig = false } = {}) {
   let rect = { w: field.clientWidth, h: field.clientHeight };
   let flippedId = null; // one card in hand at a time (D73); view-ephemera, never logged (D23)
   let playing = null; // the one summoned experience: { cardId, el, doorEl } (D75)
+  let openPage = 0; // which leaf of the open card's back is showing (D100)
+  let openLeaves = [0]; // where each leaf begins, in the open back's own pixels
 
   const layer = document.createElement('div');
   layer.className = 'threads';
@@ -70,16 +72,158 @@ export function createView(field, { debug = false, rig = false } = {}) {
     el.style.fontSize = `max(${(CARD_W * 100 * card.scale * 0.075).toFixed(3)}cqmin, ${(FLOOR_W * 0.075 * card.scale).toFixed(1)}px)`;
     const pivot = el.querySelector('.card__pivot');
     if (card.id === flippedId) { // in hand: grown, straightened, lifted, fully lit
+      // height first, so the in-hand pose is computed on the true size
+      layoutOpenBack(el);
       el.style.transform = flippedTransform(card, el);
       el.style.opacity = 1;
       el.style.zIndex = 400;
       if (pivot) pivot.style.transform = 'rotateY(180deg)';
     } else {
+      closeBack(el);
       el.style.transform = `translate(-50%, -50%) rotate(${card.rot}deg)`;
       el.style.opacity = card.opacity;
       el.style.zIndex = z;
       if (pivot) pivot.style.transform = '';
     }
+  }
+
+  // ---- the open back: one page at a time when it outgrows the light (D100) ----
+
+  function closeBack(el) {
+    el.style.height = '';
+    const back = el.querySelector('.card__back');
+    if (!back) return;
+    back.removeAttribute('data-pages');
+    back.removeAttribute('data-page');
+    back.removeAttribute('data-at');
+    back.style.removeProperty('--piece-max');
+    const flow = back.querySelector('.back__flow');
+    if (flow) flow.scrollTop = 0; // laid down, the back is whole again from the top
+  }
+
+  // Which leaf the arrangement is standing on, named on the bar.
+  function paintLeaf(back, page, pages) {
+    back.dataset.page = String(page + 1);
+    back.dataset.at = page === 0 ? 'first' : (page === pages - 1 ? 'last' : 'mid');
+    const count = back.querySelector('.back__count');
+    if (count) count.textContent = `${page + 1}/${pages}`;
+  }
+
+  // Where each leaf begins. A leaf breaks between the arrangement's own pieces
+  // — a paragraph, a still, a line — so a page never opens on a half-cut line;
+  // only a piece taller than the card itself is walked through by whole lines.
+  function leafOffsets(flow, viewport) {
+    const offsets = [0];
+    const total = flow.scrollHeight;
+    const base = flow.offsetTop; // children measure against the back, not the flow
+    let start = 0;
+    const push = (y) => {
+      const at = Math.max(0, Math.min(y, Math.max(0, total - 1)));
+      if (at > start + 0.5) { offsets.push(at); start = at; }
+    };
+    for (const child of flow.children) {
+      const top = child.offsetTop - base;
+      const height = child.offsetHeight;
+      if (top + height <= start + viewport) continue; // still fits on this leaf
+      if (height <= viewport) { push(top); continue; } // the whole piece moves down
+      if (top > start + 0.5) push(top);
+      const lh = parseFloat(getComputedStyle(child).lineHeight);
+      const step = lh > 0 ? Math.max(lh, Math.floor(viewport / lh) * lh) : viewport;
+      let y = Math.max(start, top);
+      while (top + height > y + viewport) { y += step; push(y); }
+    }
+    return offsets;
+  }
+
+  // Grows the card to hold its back; if the back is longer than a card may
+  // stand, it stays at that height and the arrangement pages. Pure layout —
+  // called on settle and whenever a leaf is turned.
+  function layoutOpenBack(el) {
+    const grow = flipGrow(el);
+    const back = el.querySelector('.card__back');
+    const flow = back?.querySelector('.back__flow');
+    if (!back || !flow) { el.style.height = ''; return; }
+    back.removeAttribute('data-pages'); // measure the whole arrangement first
+    el.style.height = '';
+    const pad = () => {
+      const cs = getComputedStyle(back);
+      return (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    };
+    const laidH = el.offsetHeight;
+    const maxH = (rect.h * OPEN_H_FRAC) / grow;
+    // a still is held to part of the card before anything is measured, so one
+    // tall photograph cannot become the whole reading (D102)
+    back.style.setProperty('--piece-max', `${Math.round(maxH * PIECE_MAX_FRAC)}px`);
+    const need = flow.scrollHeight + pad();
+    if (need <= maxH) {
+      openPage = 0;
+      openLeaves = [0];
+      back.removeAttribute('data-page');
+      if (need > laidH) el.style.height = `${Math.ceil(need)}px`;
+      return;
+    }
+    el.style.height = `${Math.floor(maxH)}px`;
+    back.dataset.pages = '2'; // the bar's room is reserved before the count is known
+    const viewport = Math.max(1, back.clientHeight - pad());
+    openLeaves = leafOffsets(flow, viewport);
+    const pages = openLeaves.length;
+    openPage = Math.max(0, Math.min(openPage, pages - 1));
+    back.dataset.pages = String(pages);
+    paintLeaf(back, openPage, pages);
+    flow.scrollTop = Math.round(openLeaves[openPage]);
+    wireScroll(el, back, flow);
+    // a still that arrives after the measure re-lays the leaves, once
+    for (const img of flow.querySelectorAll('img')) {
+      if (img.complete || img.dataset.relaid) continue;
+      img.dataset.relaid = '1';
+      img.addEventListener('load', () => { if (el.dataset.id === flippedId) settleOpen(el.dataset.id); }, { once: true });
+    }
+  }
+
+  function settleOpen(id) {
+    const card = lastState.cards.find((c) => c.id === id);
+    const el = cardEls.get(id);
+    if (!card || !el || flippedId !== id) return;
+    const z = lastState.cards.findIndex((c) => c.id === id) + 1;
+    settleCard(el, card, z);
+  }
+
+  // A hand may also push the arrangement along directly (D102): the bar keeps
+  // saying which leaf is standing, whoever moved it.
+  function wireScroll(el, back, flow) {
+    if (flow.dataset.wired) return;
+    flow.dataset.wired = '1';
+    let queued = false;
+    flow.addEventListener('scroll', () => {
+      if (queued || el.dataset.id !== flippedId || !back.dataset.pages) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        if (el.dataset.id !== flippedId || !back.dataset.pages) return;
+        const y = flow.scrollTop;
+        const atEnd = y + flow.clientHeight >= flow.scrollHeight - 2;
+        let i = atEnd ? openLeaves.length - 1 : 0;
+        if (!atEnd) while (i + 1 < openLeaves.length && openLeaves[i + 1] <= y + 2) i += 1;
+        if (i === openPage) return;
+        openPage = i;
+        paintLeaf(back, openPage, openLeaves.length);
+      });
+    }, { passive: true });
+  }
+
+  // The nav bar's two words (D100): the card stays in hand, the leaf turns.
+  function pageBack(id, dir) {
+    if (flippedId !== id) return;
+    const el = cardEls.get(id);
+    const back = el?.querySelector('.card__back');
+    const flow = back?.querySelector('.back__flow');
+    if (!back?.dataset.pages || !flow) return;
+    const pages = openLeaves.length;
+    const next = openPage + (dir === 'prev' ? -1 : 1);
+    if (next < 0 || next >= pages) return; // the ends are quiet, not wrapped
+    openPage = next;
+    paintLeaf(back, openPage, pages);
+    flow.scrollTop = Math.round(openLeaves[openPage]);
   }
 
   // Distance along a ray to the first exit from a box — slab method.
@@ -132,7 +276,7 @@ export function createView(field, { debug = false, rig = false } = {}) {
 
   // ---- reconcile ----
 
-  function reconcile(state, keep = new Set()) {
+  function reconcile(state) {
     const seenCards = new Set();
     state.cards.forEach((card, i) => {
       let el = cardEls.get(card.id);
@@ -146,7 +290,7 @@ export function createView(field, { debug = false, rig = false } = {}) {
       seenCards.add(card.id);
     });
     for (const [id, el] of cardEls) {
-      if (!seenCards.has(id) && !keep.has(id)) {
+      if (!seenCards.has(id)) {
         if (id === flippedId) { flippedId = null; stopExperience(); } // a retired card leaves the hand too
         el.remove();
         cardEls.delete(id);
@@ -166,7 +310,7 @@ export function createView(field, { debug = false, rig = false } = {}) {
       seenThreads.add(key);
     }
     for (const [key, el] of threadEls) {
-      if (!seenThreads.has(key) && !keep.has(key)) {
+      if (!seenThreads.has(key)) {
         el.remove();
         threadEls.delete(key);
       }
@@ -211,39 +355,23 @@ export function createView(field, { debug = false, rig = false } = {}) {
   const finishActive = () => settleActive('finish');
   const cancelActive = () => settleActive('discard');
 
-  // Entry pose: from the dark rim along the card's placement ray (through its
-  // settled point from the field's center), to the field inflated by one card
-  // diagonal. Deterministic per id — no runtime randomness in motion (D24).
-  function entryPose(card) {
-    const rng = mulberry32(fnv1a(card.id + ':entry'));
-    const rotExtra = (rng() - 0.5) * ENTRY_ROT;
-    const px = card.x * rect.w;
-    const py = card.y * rect.h;
-    let vx = px - rect.w / 2;
-    let vy = py - rect.h / 2;
-    const len = Math.hypot(vx, vy);
-    if (len < 1) {
-      vx = Math.cos(card.dir);
-      vy = Math.sin(card.dir);
-    } else {
-      vx /= len;
-      vy /= len;
-    }
-    const { w, h } = cardSizePx(card);
-    const diag = Math.hypot(w, h);
-    const out = rayExit(px, py, vx, vy, { x1: -diag, y1: -diag, x2: rect.w + diag, y2: rect.h + diag });
-    const travel = Math.max(out, MIN_TRAVEL * short());
-    return { dx: vx * travel, dy: vy * travel, rotExtra };
-  }
-
   // ---- the flip: picked up to read, put back where it lay (D73–D75) ----
 
   // Grown and straightened; slid inward just enough that the grown card sits
   // aligned inside the pool's border. Everything from settled data — no DOM
   // reads beyond the card's own laid size.
+  // How much a card grows when it comes into the hand: enough to read, never
+  // wider than the light allows, never smaller than it lay (D100).
+  function flipGrow(el) {
+    const w = el.offsetWidth || 1;
+    const target = Math.max(READ_MIN, Math.min(READ_MAX, rect.w * READ_W_FRAC, rect.h * READ_H_FRAC));
+    return Math.max(1, target / w);
+  }
+
   function flipPose(card, el) {
-    const gw = el.offsetWidth * FLIP_GROW;
-    const gh = el.offsetHeight * FLIP_GROW;
+    const grow = flipGrow(el);
+    const gw = el.offsetWidth * grow;
+    const gh = el.offsetHeight * grow;
     const m = Math.max(10, short() * 0.02);
     const cx = card.x * rect.w;
     const cy = card.y * rect.h;
@@ -254,7 +382,7 @@ export function createView(field, { debug = false, rig = false } = {}) {
 
   function flippedTransform(card, el) {
     const pose = flipPose(card, el);
-    return `translate(calc(-50% + ${pose.dx.toFixed(1)}px), calc(-50% + ${pose.dy.toFixed(1)}px)) rotate(0deg) scale(${FLIP_GROW})`;
+    return `translate(calc(-50% + ${pose.dx.toFixed(1)}px), calc(-50% + ${pose.dy.toFixed(1)}px)) rotate(0deg) scale(${flipGrow(el).toFixed(3)})`;
   }
 
   // Keyframes need matching transform-function lists, or interpolation falls
@@ -276,6 +404,7 @@ export function createView(field, { debug = false, rig = false } = {}) {
     const fromTurn = wasOpen ? 'rotateY(180deg)' : 'rotateY(0deg)';
     const fromOpacity = wasOpen ? 1 : card.opacity;
     flippedId = open ? id : null;
+    if (open) openPage = 0; // a card comes into the hand at its first leaf (D100)
     const z = lastState.cards.findIndex((c) => c.id === id) + 1;
     settleCard(el, card, z); // truth first; the turn is an overlay
     if (!open) el.style.zIndex = 400; // stay lifted while turning back down
@@ -327,6 +456,7 @@ export function createView(field, { debug = false, rig = false } = {}) {
   function flipInstant(id) { // dev-only (?flip=<id>): settled with a card in hand
     if (!cardEls.has(id)) return;
     flippedId = id;
+    openPage = 0;
     reconcile(lastState);
   }
 
@@ -385,145 +515,29 @@ export function createView(field, { debug = false, rig = false } = {}) {
     decodedSrcs.add(src);
   }
 
-  // One queue job: play event `ev` as the gesture between two adjacent truths.
-  async function playEvent(ev, prev, next, pace) {
+  // One queue job: place event `ev` — the instant step to its settled truth
+  // (D87: nothing on the table ever moves). The pace carries only the pass's
+  // cadence: a rest before the placement, a hold after it. The token still
+  // lets a press snap the waits — scrubbing runs as fast as the keys ask.
+  async function playEvent(ev, next, pace) {
     const token = newToken();
-    const bail = () => {
-      // 'finish': snap this gesture to done; 'discard': someone else renders
-      if (token.state === 'finish') reconcile(next);
-    };
-
     if (pace.delayBefore) {
       await Promise.race([sleep(pace.delayBefore), token.aborted]);
-      if (token.state) return bail();
+      if (token.state) {
+        if (token.state === 'finish') reconcile(next);
+        return;
+      }
     }
-
+    // decode before DOM: the trace paints whole or not at all (D55)
     if (ev.e === 'deposit' && ev.artifact.excerpt?.src) {
       await Promise.race([decodeSrc(ev.artifact.excerpt.src), token.aborted]);
-      if (token.state) return bail();
-    }
-
-    const d = pace.duration;
-    if (d === 0) { // stepped / reduced-motion: instant placement, cadence kept
-      reconcile(next);
-      if (pace.wait) await Promise.race([sleep(pace.wait), token.aborted]);
-      return;
-    }
-
-    const prevCards = new Map(prev.cards.map((c) => [c.id, c]));
-    const nextCards = new Set(next.cards.map((c) => c.id));
-    const prevThreads = new Map(prev.threads.map((t) => [threadKey(t), t]));
-    const nextThreads = new Set(next.threads.map((t) => threadKey(t)));
-    const arrivingId = ev.e === 'deposit' ? ev.artifact.id : null;
-
-    // retiring pieces stay in the DOM for their fade; removed on resolve
-    const keep = new Set();
-    for (const c of prev.cards) if (!nextCards.has(c.id)) keep.add(c.id);
-    for (const t of prev.threads) if (!nextThreads.has(threadKey(t))) keep.add(threadKey(t));
-
-    // Truth and overlay in ONE synchronous block — an await in here would paint
-    // a frame of the settled state before the animations mask it (the jitter).
-    reconcile(next, keep);
-
-    const anims = [];
-    // Nudges ripple outward from the contact: nearest cards give way first, all
-    // settled by the gesture's end — the pile absorbs the newcomer, no jolt.
-    const origin = arrivingId ? next.cards.find((c) => c.id === arrivingId) : null;
-    const rippleDelay = (x, y) => {
-      if (!origin) return d * NUDGE_AT;
-      const dist = Math.hypot((x - origin.x) * rect.w, (y - origin.y) * rect.h);
-      const span = Math.hypot(rect.w, rect.h) * 0.55;
-      return d * (NUDGE_FROM + NUDGE_SPREAD * Math.min(1, dist / span));
-    };
-    const rippled = (x, y) => {
-      const delay = rippleDelay(x, y);
-      return { delay, duration: Math.max(1, d - delay), easing: SETTLE_EASE, fill: 'backwards' };
-    };
-    const later = rippled(origin?.x ?? 0.5, origin?.y ?? 0.5); // for threads: flat, un-located
-
-    for (const card of next.cards) {
-      const el = cardEls.get(card.id);
-      const was = prevCards.get(card.id);
-      if (card.id === arrivingId && !was) {
-        const pose = entryPose(card);
-        anims.push(track(el.animate([
-          {
-            transform: `translate(calc(-50% + ${pose.dx.toFixed(1)}px), calc(-50% + ${pose.dy.toFixed(1)}px)) rotate(${(card.rot + pose.rotExtra).toFixed(2)}deg)`,
-            opacity: 0,
-            offset: 0,
-          },
-          { opacity: card.opacity, offset: ENTRY_LIT_AT }, // lit once out of the rim
-          { transform: `translate(-50%, -50%) rotate(${card.rot}deg)`, opacity: card.opacity, offset: 1 },
-        ], { duration: d, easing: EASE })));
-        continue;
-      }
-      if (!was) continue; // jumped in outside a gesture (shouldn't happen mid-queue)
-      if (card.id === flippedId) continue; // a card in hand holds its pose; truth moved via settle
-      const moved = was.x !== card.x || was.y !== card.y || was.rot !== card.rot;
-      const dimmed = was.opacity !== card.opacity;
-      if (!moved && !dimmed) continue;
-      const dx = (was.x - card.x) * rect.w;
-      const dy = (was.y - card.y) * rect.h;
-      anims.push(track(el.animate([
-        {
-          transform: `translate(calc(-50% + ${dx.toFixed(1)}px), calc(-50% + ${dy.toFixed(1)}px)) rotate(${was.rot}deg)`,
-          opacity: was.opacity,
-        },
-        { transform: `translate(-50%, -50%) rotate(${card.rot}deg)`, opacity: card.opacity },
-      ], rippled(card.x, card.y))));
-    }
-
-    for (const thread of next.threads) {
-      const key = threadKey(thread);
-      const el = threadEls.get(key);
-      const was = prevThreads.get(key);
-      const g = threadGeom(thread, next);
-      if (!g) continue;
-      if (!was) { // the arrival of a thread event — it draws itself (D14)
-        anims.push(track(el.animate([
-          { transform: threadTransform(g, 0), opacity: thread.opacity },
-          { transform: threadTransform(g), opacity: thread.opacity },
-        ], { duration: d, easing: EASE })));
-        continue;
-      }
-      const gWas = threadGeom(was, prev);
-      if (!gWas) continue;
-      if (gWas.x !== g.x || gWas.y !== g.y || gWas.len !== g.len || was.opacity !== thread.opacity) {
-        anims.push(track(el.animate([
-          { transform: threadTransform(gWas), opacity: was.opacity },
-          { transform: threadTransform(g), opacity: thread.opacity },
-        ], later)));
+      if (token.state) {
+        if (token.state === 'finish') reconcile(next);
+        return;
       }
     }
-
-    // retirements: quiet fade, then gone (D32). fill:'forwards' holds the faded
-    // frame until removal — without it the node flashes back for one paint.
-    for (const c of prev.cards) {
-      if (nextCards.has(c.id)) continue;
-      const el = cardEls.get(c.id);
-      if (!el) continue;
-      const a = track(el.animate([{ opacity: c.opacity }, { opacity: 0 }], { duration: d, easing: 'ease-out', fill: 'forwards' }));
-      anims.push(a);
-      a.finished.catch(() => {}).then(() => { el.remove(); cardEls.delete(c.id); });
-    }
-    for (const t of prev.threads) {
-      const key = threadKey(t);
-      if (nextThreads.has(key)) continue;
-      const el = threadEls.get(key);
-      if (!el) continue;
-      const a = track(el.animate([{ opacity: t.opacity }, { opacity: 0 }], { duration: d, easing: 'ease-out', fill: 'forwards' }));
-      anims.push(a);
-      a.finished.catch(() => {}).then(() => { el.remove(); threadEls.delete(key); });
-    }
-
-    if (!anims.length) return;
-    const finished = Promise.allSettled(anims.map((a) => a.finished.catch(() => {})));
-    const outcome = await Promise.race([
-      finished.then(() => 'finished'),
-      sleep(d + SETTLE_GRACE_MS).then(() => 'deadline'),
-      token.aborted, // settled early: animations cancelled, truth already written
-    ]);
-    if (outcome === 'deadline' && debug) console.warn(`desk: gesture for ${ev.e} resolved by deadline, not finished`);
+    reconcile(next);
+    if (pace.wait) await Promise.race([sleep(pace.wait), token.aborted]);
   }
 
   function onResize() {
@@ -536,5 +550,5 @@ export function createView(field, { debug = false, rig = false } = {}) {
     }
   }
 
-  return { renderInstant, playEvent, cancelActive, finishActive, onResize, flipJob, flipInstant, tapDoor };
+  return { renderInstant, playEvent, cancelActive, finishActive, onResize, flipJob, flipInstant, tapDoor, pageBack };
 }

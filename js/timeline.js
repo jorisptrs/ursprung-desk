@@ -1,18 +1,18 @@
 // The clock. Only this module maps intent to table time; the view is only ever
-// told "animate one more event at this tempo" (D26: the driver conducts, never
-// fabricates). Pure state machine — reduce(state, action, n) → { state, effects } —
-// so the whole key-spam matrix is node truth. The cursor is event-granular: the
-// table is always a settled fold state or tweening to the next one.
+// told "place one more event, then rest this long" (D26: the driver conducts,
+// never fabricates). Pure state machine — reduce(state, action, n) →
+// { state, effects } — so the whole key-spam matrix is node truth. The cursor
+// is event-granular; placements are instant (D87: cards never move), so the
+// pass is a cadence of appearances and stepping is immediate.
 //
-// Modes: held (rig rest; step advances one), live (target pinned to the stream,
-// later appends play as they land), compressed (the full stream from empty —
+// Modes: held (rest; step advances one), live (target pinned to the stream,
+// later appends appear as they land), compressed (the full stream from empty —
 // one policy, two entrances: the D12 opening pass at boot, R under the driver).
 //
-// Effects, for the shell to execute: 'sync' (flush motion, render the cursor's
-// settled state instantly — scene changes are not motion), 'drain' (start
+// Effects, for the shell to execute: 'sync' (flush, render the cursor's settled
+// state instantly), 'finish' (snap the in-flight gesture), 'drain' (start
 // playing toward target).
 
-export const LIVE_MS = 1600; // furniture-slow arrival
 export const PASS_MS = 15000; // opening-pass budget, mid of D12's 12–18 s window
 export const REST_MS = 1000; // beat on the empty pool before the first quest
 export const BEAT_MS = 500; // breath between nights — four days read as four waves
@@ -21,10 +21,9 @@ export const EVENT_MAX_MS = 900;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-export function initialState({ after = 'live', stepped = false } = {}) {
+export function initialState({ after = 'live' } = {}) {
   // after: where a finished compressed run rests — 'live' (deployed) or 'held' (rig).
-  // stepped: prefers-reduced-motion — instant placements on the same cadence.
-  return { mode: 'held', cursor: 0, target: 0, after, stepped };
+  return { mode: 'held', cursor: 0, target: 0, after };
 }
 
 export function reduce(state, action, n) {
@@ -34,18 +33,21 @@ export function reduce(state, action, n) {
     case 'replay':
       return { state: { ...state, mode: 'compressed', cursor: 0, target: n }, effects: ['sync', 'drain'] };
     case 'step':
-      // Space, in any mode (D78): mid-deal it snaps the card in flight so the
-      // next starts now; held, it deals one more — press-through at any speed.
+      // Space/→ in any mode (D78): mid-deal it snaps the wait so the next card
+      // appears now; held, it deals one more — held down, this is the scrub.
       if (state.mode !== 'held') return { state, effects: ['finish'] };
       if (state.target >= n) return none;
       return { state: { ...state, target: state.target + 1 }, effects: ['finish', 'drain'] };
-    case 'feed': // Space held down: keep exactly one card queued while keys repeat
-      if (state.mode !== 'held' || state.target >= n || state.target - state.cursor > 1) return none;
-      return { state: { ...state, target: state.target + 1 }, effects: ['drain'] };
-    case 'hand-release': // Space released: the card in flight lands, then the table holds
-      if (state.mode !== 'held') return none;
-      return { state: { ...state, target: Math.min(state.target, state.cursor + 1) }, effects: [] };
-    case 'pause': // d mid-deal: snap the card in flight placed, hold right here — nothing clears
+    case 'back':
+      // ← is navigation (D78): instant, spammable, scrubbable. In auto it
+      // first stops right here, like d.
+      if (state.mode !== 'held')
+        return { state: { ...state, mode: 'held', target: Math.min(state.target, state.cursor + 1) }, effects: ['finish'] };
+      if (state.cursor < state.target) // a card still pending never lands
+        return { state: { ...state, target: state.cursor }, effects: ['sync'] };
+      if (state.cursor === 0) return none;
+      return { state: { ...state, cursor: state.cursor - 1, target: state.target - 1 }, effects: ['sync'] };
+    case 'pause': // d mid-deal: hold right here — nothing clears
       if (state.mode !== 'compressed' && state.mode !== 'live') return none;
       return { state: { ...state, mode: 'held', target: Math.min(state.target, state.cursor + 1) }, effects: ['finish'] };
     case 'resume': // d from held with cards remaining: deal the rest at pass cadence
@@ -72,7 +74,10 @@ export function reduce(state, action, n) {
     case 'drained': { // cursor reached target and the queue is idle
       if (state.mode !== 'compressed') return none;
       const mode = state.after;
-      return { state: { ...state, mode, target: mode === 'live' ? n : state.target }, effects: [] };
+      const target = mode === 'live' ? n : state.target;
+      // deposits that landed mid-pass were held for the take (D13); resting
+      // into live is their transition — they play now, not on the next poke
+      return { state: { ...state, mode, target }, effects: target > state.cursor ? ['drain'] : [] };
     }
     case 'hide-flush': // tab hidden mid-pass: arrivals are owed the greeting, returners no rerun
       if (state.mode !== 'compressed') return none;
@@ -94,17 +99,13 @@ export function compressedEventMs(events) {
 }
 
 export function pacing(state, events, k) {
-  // → { duration, delayBefore, wait } (ms) for the gesture playing event k.
-  // duration: the tween; delayBefore: rest/beat ahead of it; wait: the
-  // post-placement hold in stepped mode, where placements are instant but the
-  // cadence still narrates. One gesture at a time, always (D13).
-  if (state.mode !== 'compressed') {
-    return { duration: state.stepped ? 0 : LIVE_MS, delayBefore: 0, wait: 0 };
-  }
+  // → { delayBefore, wait } (ms) for the gesture placing event k: placement is
+  // instant (D87); delayBefore is the rest/beat ahead of it, wait the hold
+  // after — the cadence that narrates the pass. Outside the pass, both are 0.
+  if (state.mode !== 'compressed') return { delayBefore: 0, wait: 0 };
   const eventMs = compressedEventMs(events);
   const delayBefore = k === 0 ? REST_MS : events[k].night !== events[k - 1].night ? BEAT_MS : 0;
-  if (state.stepped) return { duration: 0, delayBefore, wait: eventMs };
-  return { duration: eventMs, delayBefore, wait: 0 };
+  return { delayBefore, wait: eventMs };
 }
 
 export function createTimeline(opts) {
