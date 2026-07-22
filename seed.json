@@ -1,0 +1,141 @@
+{ "events": [
+  { "e": "deposit", "night": 0,
+    "artifact": {
+      "id": "a-001", "media": "note", "kind": "quest",
+      "title": "a fold that will not close",
+      "people": ["R."], "practice": "origami", "provenance": "curator", "visibility": "public",
+      "excerpt": { "form": "words", "text": "a fold that will not close" }
+    } },
+  { "e": "deposit", "night": 0,
+    "artifact": {
+      "id": "a-002", "media": "note", "kind": "quest",
+      "title": "finish the piece",
+      "people": ["B."], "practice": "music", "provenance": "curator", "visibility": "public",
+      "excerpt": { "form": "words", "text": "finish the piece" }
+    } },
+  { "e": "deposit", "night": 0,
+    "artifact": {
+      "id": "a-003", "media": "note", "kind": "quest",
+      "title": "rebuild the zither",
+      "people": ["Y."], "practice": "instruments", "provenance": "curator", "visibility": "public",
+      "excerpt": { "form": "words", "text": "rebuild the zither" }
+    } },
+  { "e": "deposit", "night": 0,
+    "artifact": {
+      "id": "a-004", "media": "note", "kind": "quest",
+      "title": "the 1993 system",
+      "people": ["M."], "practice": "code", "provenance": "curator", "visibility": "public",
+      "excerpt": { "form": "words", "text": "the 1993 system" }
+    } },
+  { "e": "deposit", "night": 0,
+    "artifact": {
+      "id": "a-005", "media": "note", "kind": "quest",
+      "title": "a chapter that resists",
+      "people": ["E."], "practice": "manuscript", "provenance": "curator", "visibility": "public",
+      "excerpt": { "form": "words", "text": "a chapter that resists" }
+    } },
+
+  { "e": "deposit", "night": 1,
+    "artifact": {
+      "id": "a-006", "media": "image", "kind": "work",
+      "title": "jazz coding, resumed",
+      "caption": "one phone, six hands · the walk",
+      "people": ["M.", "L.", "T."], "practice": "code", "provenance": "hand", "visibility": "public",
+      "excerpt": { "form": "crop", "src": "assets/placeholder-photo.svg" }
+    } },
+
+  { "e": "deposit", "night": 2,
+    "artifact": {
+      "id": "a-007", "media": "audio", "kind": "work",
+      "title": "kettle drone, take 4",
+      "caption": "audio · B. + Claude",
+      "people": ["B.", "Claude"], "practice": "music", "provenance": "hand", "visibility": "public",
+      "excerpt": { "form": "waveform", "src": "assets/waveform-kettle.svg" },
+      "detail": { "experience": { "mode": "play", "src": "assets/Test.m4a" } }
+    } },
+  { "e": "deposit", "night": 2,
+    "artifact": {
+      "id": "a-008", "media": "code", "kind": "work",
+      "title": "the 1993 system",
+      "caption": "running · M. + Claude",
+      "people": ["M.", "Claude"], "practice": "code", "provenance": "mcp", "visibility": "public",
+      "excerpt": { "form": "lines", "text": "while (alive) {\n  listen();\n  adapt();\n}" }
+    } },
+  { "e": "thread", "night": 2, "from": "a-004", "to": "a-008", "why": "the quest, answered" },
+  { "e": "deposit", "night": 2,
+    "artifact": {
+      "id": "a-009", "media": "fold", "kind": "work",
+      "title": "crease pattern",
+      "caption": "22.5° · flat-foldable",
+      "people": ["R."], "practice": "origami", "provenance": "hand", "visibility": "public",
+      "excerpt": { "form": "linework", "src": "assets/placeholder-crease.svg" }
+    } },
+  { "e": "deposit", "night": 2,
+    "artifact": {
+      "id": "a-010", "media": "video", "kind": "work",
+      "title": "a dish, pinched",
+      "caption": "three stills · day two",
+      "people": ["P."], "practice": "ceramics", "provenance": "hand", "visibility": "public",
+      "excerpt": { "form": "frames", "src": "assets/placeholder-frames.svg" }
+    } },
+
+  { "e": "deposit", "night": 3,
+    "artifact": {
+      "id": "a-011", "media": "text", "kind": "work",
+      "title": "chapter 7, rewritten",
+      "caption": "manuscript · E. + Claude",
+      "people": ["E.", "Claude"], "practice": "manuscript", "provenance": "mcp", "visibility": "public",
+      "excerpt": { "form": "sentence", "text": "The river had been rehearsing this bend for a thousand years." }
+    } },
+  { "e": "thread", "night": 3, "from": "a-005", "to": "a-011", "why": "the quest, answered" },
+  { "e": "deposit", "night": 3,
+    "artifact": {
+      "id": "a-012", "media": "note", "kind": "failure",
+      "title": "fugue scoring — no use",
+      "caption": "tried twice · stays up",
+      "people": ["B.", "Claude"], "practice": "music", "provenance": "curator", "visibility": "public",
+      "excerpt": { "form": "words", "text": "fugue scoring — no use" }
+    } },
+  { "e": "deposit", "night": 3,
+    "artifact": {
+      "id": "a-013", "media": "note", "kind": "fieldnotes",
+      "title": "the fold and the drone are one problem",
+      "people": ["Claude"], "practice": "cartography", "provenance": "curator", "visibility": "public",
+      "excerpt": { "form": "words", "text": "the fold and the drone are one problem" }
+    } },
+  { "e": "deposit", "night": 3,
+    "artifact": {
+      "id": "a-014", "media": "image", "kind": "work",
+      "title": "the fold, closed",
+      "people": ["R."], "practice": "origami", "provenance": "hand", "visibility": "public",
+      "excerpt": { "form": "crop", "src": "assets/placeholder-photo.svg" }
+    } },
+  { "e": "thread", "night": 3, "from": "a-001", "to": "a-014", "why": "the quest, answered" },
+
+  { "e": "deposit", "night": 4,
+    "artifact": {
+      "id": "a-015", "media": "audio", "kind": "work",
+      "title": "the piece, finished",
+      "caption": "take 11 · kept",
+      "people": ["B.", "Claude"], "practice": "music", "provenance": "hand", "visibility": "public",
+      "excerpt": { "form": "waveform", "src": "assets/waveform-piece.svg" },
+      "detail": { "experience": { "mode": "play", "src": "assets/Test.m4a" } }
+    } },
+  { "e": "thread", "night": 4, "from": "a-002", "to": "a-015", "why": "the quest, answered" },
+  { "e": "deposit", "night": 4,
+    "artifact": {
+      "id": "a-016", "media": "note", "kind": "fieldnotes",
+      "title": "what leaves this room by van, what leaves by hand",
+      "people": ["Claude"], "practice": "cartography", "provenance": "curator", "visibility": "public",
+      "excerpt": { "form": "words", "text": "what leaves this room by van, what leaves by hand" }
+    } },
+  { "e": "deposit", "night": 4,
+    "artifact": {
+      "id": "a-017", "media": "note", "kind": "meta",
+      "title": "the desk, v0",
+      "caption": "J. + Claude · Berlin, July",
+      "people": ["J.", "Claude"], "practice": "cartography", "provenance": "curator", "visibility": "public",
+      "excerpt": { "form": "words", "text": "the desk, v0" },
+      "detail": { "note": "a seeded demonstration — the people are invented, the works are stand-ins · the real table opens in October" }
+    } }
+] }
