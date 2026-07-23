@@ -747,7 +747,8 @@ export function createView(field, { rig = false } = {}) {
   }
 
   function flipInstant(id) { // dev-only (?flip=<id>): settled with a card in hand
-    if (!cardEls.has(id)) return;
+    const el = cardEls.get(id);
+    if (!el || !el.classList.contains('card--backed')) return; // a card with no back turns to a blank page
     flippedId = id;
     openPage = 0;
     reconcile(lastState);

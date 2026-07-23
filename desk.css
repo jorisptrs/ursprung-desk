@@ -503,29 +503,34 @@ html.rig, html.rig body { cursor: none; }
 }
 .kind--failure .kind--failure .card__front { padding-top: 2.1em; } /* the stamp keeps its own band */
 
-/* "failure" printed horizontal; "Claude" stamped diagonally across it, its
-   middle over the word's start — a stamp on print (D9). Set in the wordmark's
-   serif family where the machine has it; nothing is ever fetched (D36). */
+/* "note" printed horizontal; "Claude" stamped diagonally across it — a stamp on
+   print (D9). It sits on its own line at the head of the card rather than over
+   the work: a stamp is put on a page, not through what the page says. Set in
+   the wordmark's serif family where the machine has it; nothing is fetched (D36). */
 .failure-stamp {
-  position: absolute;
-  top: 1em;
-  right: 0.6em;
+  position: relative;
+  width: fit-content;
+  margin: 0 0 0.45em auto; /* its own line, at the right where a stamp lands */
+  padding-left: 3.95em; /* the room the diagonal word stands in, beside the other */
   font-family: 'Copernicus', 'Tiempos Text', 'Iowan Old Style', Palatino, Georgia, serif;
-  font-size: 0.8em;
-  letter-spacing: 0.08em;
-  color: rgba(58, 53, 45, 0.75);
+  font-size: 1em;
+  line-height: 1.35;
+  letter-spacing: 0.05em;
+  color: rgba(58, 53, 45, 0.85);
   pointer-events: none;
 }
 
 .failure-stamp__who {
   position: absolute;
-  left: -1.5em;
-  top: -0.6em;
-  transform: rotate(-12deg);
+  /* it leans across the other word's first letter and no further: a stamp that
+     lands square on the print is a stamp nobody can read */
+  left: 0.1em;
+  top: -0.05em;
+  transform: rotate(-10deg);
   font-size: 1.15em;
   font-weight: 500;
   letter-spacing: 0.02em;
-  color: rgba(58, 53, 45, 0.85);
+  color: rgba(58, 53, 45, 0.95);
 }
 
 /* ---- back composition (D88): the maker's arrangement on the sheet's
