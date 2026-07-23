@@ -129,9 +129,14 @@ async function main() {
   await click(top.x + top.w / 2, top.y + top.h / 2);
   await shot('1-open');
   const opened = await geom();
-  const spread = deep.map((c) => opened.find((o) => o.id === c.id));
-  const moved = spread.filter((c, i) => Math.hypot(c.x - deep[i].x, c.y - deep[i].y) > 4).length;
-  ok(moved >= deep.length - 1, `the tap spread the pile — ${moved} of ${deep.length} cards moved`);
+  // the pile is whatever the fold says it is, not whatever lay near it
+  const lit = await evalIn(`[...document.querySelectorAll('.card[data-lit]')].map((el) => el.dataset.id)`);
+  ok(lit.length >= 2, `the whole pile is lit — ${lit.length} cards`);
+  const spread = lit.map((id) => opened.find((o) => o.id === id));
+  ok(spread.every(Boolean), 'and every one of them is on the table');
+  const was = new Map(cards.map((c) => [c.id, c]));
+  const moved = spread.filter((c) => Math.hypot(c.x - was.get(c.id).x, c.y - was.get(c.id).y) > 4).length;
+  ok(moved >= spread.length - 1, `the tap spread the pile — ${moved} of ${spread.length} cards moved`);
   ok(spread.every((c) => c.z >= 300), 'and the open pile lifted above the table');
   const onTable = spread.every((c) => c.x >= -1 && c.y >= -1 && c.x + c.w <= 1601 && c.y + c.h <= 1001);
   ok(onTable, 'the whole spread stayed in the light');
@@ -141,7 +146,9 @@ async function main() {
   for (let i = 0; i < spread.length; i++) {
     for (let j = i + 1; j < spread.length; j++) worst = Math.max(worst, overlap(spread[i], spread[j]) / (spread[i].w * spread[i].h));
   }
-  ok(worst < 0.12, `and the spread cards barely touch (worst overlap ${(worst * 100).toFixed(0)}%)`);
+  ok(worst === 0, `and no card of the open pile covers another (worst overlap ${(worst * 100).toFixed(0)}%)`);
+  ok(await evalIn("document.getElementById('field').hasAttribute('data-reading')"),
+    'the rest of the table stepped back while the pile is open');
 
   // the second beat: a card of the open pile comes into the hand
   const pick = spread.find((c) => backed.includes(c.id)) ?? spread[spread.length - 1];
@@ -153,6 +160,22 @@ async function main() {
   ok(held.w > pick.w * 1.4, `the second tap read the card (${Math.round(pick.w)}px → ${Math.round(held.w)}px)`);
   const threads = await evalIn("document.querySelectorAll('.thread').length");
   ok(threads > 0, `${threads} threads drawn`);
+  ok(await evalIn("document.getElementById('field').hasAttribute('data-reading')"),
+    'and the table stepped back around the card in hand');
+
+  // a recording plays where it lies rather than fetching a file (D147)
+  const sound = await evalIn(`(() => {
+    for (const el of document.querySelectorAll('.card--backed')) {
+      const p = el.querySelector('audio[data-plays], video[data-plays]');
+      if (p) return { id: el.dataset.id, tag: p.tagName, controls: p.controls, src: p.getAttribute('src'),
+                      links: [...el.querySelectorAll('.back__line')].map((a) => a.getAttribute('href')) };
+    }
+    return null;
+  })()`);
+  ok(sound, `a recording is a player on the back (${sound?.tag ?? 'none found'})`);
+  ok(sound?.controls, 'with a transport anyone can work');
+  ok(!(sound?.links ?? []).some((h) => /\.(m4a|mp3|wav|mp4|mov|webm)$/i.test(h ?? '')),
+    'and no line beside it that would fetch the same file instead');
 
   // and the wood puts everything back — a point inside the light with nothing on it
   const wood = await evalIn(`(() => {
@@ -170,8 +193,10 @@ async function main() {
   await click(wood.x, wood.y);
   await shot('3-closed');
   const back = await geom();
-  const rest = deep.map((c) => back.find((o) => o.id === c.id));
-  const drift = rest.map((c, i) => Math.hypot(c.x - deep[i].x, c.y - deep[i].y));
+  const drift = spread.map((c) => {
+    const now = back.find((o) => o.id === c.id);
+    return Math.hypot(now.x - was.get(c.id).x, now.y - was.get(c.id).y);
+  });
   ok(Math.max(...drift) < 4, `a tap on the wood laid the pile back where it was (worst ${Math.max(...drift).toFixed(1)}px)`);
 
   await cdp.close();

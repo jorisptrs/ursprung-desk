@@ -138,3 +138,31 @@ export function arrange(people, pairs = [], previous = {}, { steps = STEPS, drif
   }
   return places;
 }
+
+// A pile opened under a hand (D144): every card shown whole, a thin margin
+// between them, and no more room taken than that needs — a pile of two opens to
+// two cards wide, not to the deck's fixed square. Cards in one studio are not
+// one size (a photograph is taller than a note), so rows are shelf-packed: each
+// row is as tall as its tallest card, and the block is centred on the studio.
+// Sizes in, offsets from the block's centre out. Pure — no DOM, no clock.
+export function packSpread(sizes, gap = 8) {
+  const list = (sizes ?? []).filter((s) => s && s.w > 0 && s.h > 0);
+  if (!list.length) return { offsets: [], w: 0, h: 0 };
+  const cols = Math.ceil(Math.sqrt(list.length));
+  const rows = [];
+  for (let i = 0; i < list.length; i += cols) rows.push(list.slice(i, i + cols));
+  const rowW = rows.map((r) => r.reduce((s, c) => s + c.w, 0) + gap * (r.length - 1));
+  const rowH = rows.map((r) => Math.max(...r.map((c) => c.h)));
+  const h = rowH.reduce((a, b) => a + b, 0) + gap * (rows.length - 1);
+  const offsets = [];
+  let y = -h / 2;
+  rows.forEach((row, ri) => {
+    let x = -rowW[ri] / 2;
+    for (const c of row) {
+      offsets.push({ dx: x + c.w / 2, dy: y + rowH[ri] / 2 });
+      x += c.w + gap;
+    }
+    y += rowH[ri] + gap;
+  });
+  return { offsets, w: Math.max(...rowW), h };
+}

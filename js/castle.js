@@ -53,10 +53,9 @@ export const castleEvents = (() => {
       const failed = n % 17 === 5;
       const w = failed ? FAILURES[n % FAILURES.length] : WORKS[(n * 5 + night) % WORKS.length];
       const people = [who, ...(shared ? [also] : []), ...(withClaude ? ['Claude'] : [])];
-      const credit = withClaude ? `${w.caption} · ${who} + Claude` : w.caption;
       deposits.push({ e: 'deposit', night, artifact: {
         id: `c-${++n}`, media: w.media, kind: failed ? 'failure' : 'work',
-        title: w.title, caption: credit, people,
+        title: w.title, caption: w.caption, people,
         provenance: i % 5 === 0 ? 'mcp' : 'hand', visibility: 'public',
         excerpt: w.src ? { form: w.form, src: w.src } : { form: w.form, text: w.text },
         ...(w.detail ? { detail: w.detail } : {}),
