@@ -124,6 +124,13 @@ const HELPERS = `
   globalThis.docText = () => __view.state.doc.toString();
   globalThis.putCursor = (pos) => { __view.dispatch({ selection: { anchor: Math.min(pos, __view.state.doc.length) } }); __view.focus(); };
   globalThis.clearDoc = () => { __view.dispatch({ changes: { from: 0, to: __view.state.doc.length, insert: '' } }); __view.focus(); };
+  globalThis.tapDeck = (sel) => {
+    const stack = document.querySelector('.sheet__stack');
+    stack.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); // the click that opens
+    const el = document.querySelector(sel);
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));    // the one that takes
+    el.click();
+  };
   globalThis.tapCard = (id) => {
     const el = document.querySelector('[data-id="' + id + '"]');
     const r = el.getBoundingClientRect();
@@ -219,7 +226,7 @@ try {
   ok(await evalIn(table, `${HELPERS} edReady()`, true), 'a second sheet mounts');
   await evalIn(table, `(() => { const p = document.querySelector('.sheet input[type=file][hidden]'); globalThis.__accept = null; p.click = () => { globalThis.__accept = p.accept; }; })()`);
   await evalIn(table, `__view.focus()`);
-  await typeLines(table, ['# the kiln door', 'by the west wall ']);
+  await typeLines(table, ['# the kiln door', '@T. worked by the west wall ']);
   await insert(table, '/im');
   ok(await evalIn(table, `${HELPERS} until(() => document.querySelector('.cm-tooltip-autocomplete li[aria-selected] .cm-completionLabel')?.textContent === 'image', 3000)`, true), 'mid-text /im filters the menu to image');
   await sleep(150);
@@ -282,17 +289,32 @@ try {
   ok((await evalIn(table, `docText()`)) === docBefore, 'and nothing reached the page');
   await press(table, 'Backspace'); // the blank line the door was opened on
 
-  // set aside: the card joins the deck, in person; a tap picks it back up (D99)
+  // set aside: the card joins the pile, in person — no label, no status line,
+  // the pile gaining a card is the whole answer (D99/D114)
   await evalIn(table, `${HELPERS} act('set aside')`);
-  ok(await evalIn(table, `${HELPERS} until(() => sheetStatus() === 'set aside · in the deck', 4000)`, true), 'set aside says where it went');
   ok(await evalIn(table, `${HELPERS} until(() => {
+    const slot = document.querySelector('.sheet__stack .deck-card');
+    return !!slot && slot.title === 'the kiln door' && !!slot.querySelector('.card--image') && docText() === '' && sheetStatus() === '';
+  }, 4000)`, true), 'the pile shows the card itself — mini, named, no words — and the page is clear');
+  ok(await evalIn(table, `(() => {
+    const stack = document.querySelector('.sheet__stack');
+    stack.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+    stack.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }));
+    return !stack.classList.contains('stack--open');
+  })()`), 'a passing pointer leaves the pile alone (D115)');
+  ok(await evalIn(table, `(() => {
+    const stack = document.querySelector('.sheet__stack');
+    stack.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    return stack.classList.contains('stack--open');
+  })()`), 'a click is what opens it (D115)');
+  ok(await evalIn(table, `(() => {
     const slot = document.querySelector('.deck-card');
-    return !!slot && slot.title === 'the kiln door' && !!slot.querySelector('.card--image') && docText() === '';
-  }, 4000)`, true), 'the deck shows the card itself — mini, named — and the page is clear');
+    return getComputedStyle(slot).transform !== 'none' && slot.style.getPropertyValue('--sx') === '0px' && slot.style.getPropertyValue('--sy') === '0px';
+  })()`), 'alone, it grows in place — no sideways step (D114)');
   // a second card, written after the first went to the deck: the editor must
   // still see new pieces — the registry is emptied in place, never swapped (D99)
   await evalIn(table, `__view.focus()`);
-  await insert(table, 'a second card, written after the first went to the deck');
+  await insert(table, 'a second card by @T., written after the first went to the deck');
   await evalIn(table, `putCursor(0)`); // the synthetic drop lands at the top; the sentence gives the pen a line to leave to
   await evalIn(table, `(async () => {
     const c = document.createElement('canvas'); c.width = 200; c.height = 140;
@@ -306,7 +328,7 @@ try {
   ok(await evalIn(table, `${HELPERS} until(() => document.querySelector('.editor .edit-piece__caption')?.textContent === 'the green plate', 4000)`, true), 'a picture added after a set-aside still renders — the registry survives the clearing (D99)');
   await evalIn(table, `clearDoc()`);
 
-  await evalIn(table, `document.querySelector('.deck-card').click()`);
+  await evalIn(table, `${HELPERS} tapDeck('.deck-card')`);
   ok(await evalIn(table, `${HELPERS} until(() => docText().includes('the west door') && sheetStatus().includes('picked up from the deck'), 4000)`, true), 'a tap hands the card back to the pen');
   ok(await evalIn(table, `__view.hasFocus && __view.state.selection.main.head === __view.state.doc.length`), 'picked up means in hand — the editor holds the pen at the end (D99)');
   await evalIn(table, `${HELPERS} act('push to table')`);
@@ -366,7 +388,7 @@ try {
   await press(table, 'Enter');
   ok(await evalIn(table, `${HELPERS} edReady()`, true), 'a sheet for the long card');
   await typeLines(table, ['# the long account', ...Array.from({ length: 14 }, (_, i) =>
-    `Paragraph ${i + 1}. The kiln was opened at first light and the whole batch was carried out to the yard, where the wind took the last of the heat off the glaze and everyone stood about saying nothing much.`),
+    `Paragraph ${i + 1}, by @E.. The kiln was opened at first light and the whole batch was carried out to the yard, where the wind took the last of the heat off the glaze and everyone stood about saying nothing much.`),
     'Supercalifragilisticexpialidociousandthensomemoreletterswithnospacesatallxxxxxxxxxxxxxxxx',
     'https://example.test/a/very/long/path/that/keeps/going/and/going/until/it/is/wider/than/any/card?with=query&and=more']);
   // a tall portrait, the kind that used to take three leaves on its own (D102)
@@ -506,6 +528,8 @@ try {
   await evalIn(phone, `putCursor(0)`);
   await insert(phone, '# drone, phone take');
   await press(phone, 'Enter');
+  await insert(phone, 'by @B.'); // every card names its author (D118)
+  await press(phone, 'Enter');
   await evalIn(phone, `document.querySelector('.sheet__flag').click()`);
   ok(await evalIn(phone, `document.querySelector('.sheet__flag').classList.contains('sheet__opt--on') && document.querySelector('[placeholder^="origami"]').offsetParent !== null`), 'flagging the failure raises the practice field, required (D98)');
   await evalIn(phone, `${HELPERS} act('push to table')`);
@@ -538,9 +562,9 @@ try {
     const tx = db.transaction('entries', 'readwrite');
     tx.objectStore('entries').put({
       id: 's-99', seq: 99,
-      artifact: { media: 'text', kind: 'work', title: 'old card', practice: 'music', provenance: 'hand', visibility: 'public', excerpt: { form: 'sentence', text: 'the body line' } },
+      artifact: { media: 'text', kind: 'work', title: 'old card', practice: 'music', people: ['Y.'], provenance: 'hand', visibility: 'public', excerpt: { form: 'sentence', text: 'the body line @Y.' } },
       blobs: {},
-      sheet: { title: 'old card', kind: 'work', practice: 'music', frontTextId: 'title', blocks: [{ id: 't1', t: 'text', text: 'the body line' }] },
+      sheet: { title: 'old card', kind: 'work', practice: 'music', frontTextId: 'title', blocks: [{ id: 't1', t: 'text', text: 'the body line @Y.' }] },
     });
     await new Promise((res) => { tx.oncomplete = res; });
     db.close();
@@ -549,7 +573,7 @@ try {
   await sleep(400);
   ok(await evalIn(phone, `${HELPERS} edReady()`, true), 'the page returns, the deck persisted');
   ok(await evalIn(phone, `${HELPERS} until(() => !!document.querySelector('.deck-card[title="old card"]'), 6000)`, true), 'the planted v1 card stands in the deck by name');
-  await evalIn(phone, `document.querySelector('.deck-card[title="old card"]').click()`);
+  await evalIn(phone, `${HELPERS} tapDeck('.deck-card[title="old card"]')`);
   ok(await evalIn(phone, `${HELPERS} until(() => docText().startsWith('# old card'), 4000)`, true), 'a v1 legacy entry opens as the md page (D96)');
   await evalIn(phone, `${HELPERS} act('set aside')`);
   ok(await evalIn(phone, `${HELPERS} until(() => sheetStatus() === 'kept', 4000)`, true), 'and keeps its changes');
@@ -568,12 +592,19 @@ try {
   ok(await evalIn(phone, `document.querySelectorAll('.deck-card').length === 1
     && getComputedStyle(document.querySelector('.sheet__pushall')).display === 'none'`), 'one card set aside: no batch door, just the card (D101)');
   await evalIn(phone, `__view.focus()`);
-  await typeLines(phone, ['# a batch companion', 'set aside so the deck holds two.']);
+  await typeLines(phone, ['# a batch companion', 'set aside by @T. so the deck holds two.']);
   await evalIn(phone, `${HELPERS} act('set aside')`);
   ok(await evalIn(phone, `${HELPERS} until(() => {
     const b = document.querySelector('.sheet__pushall');
     return document.querySelectorAll('.deck-card').length === 2 && getComputedStyle(b).display !== 'none' && b.textContent === 'push all 2 to table';
   }, 4000)`, true), 'a second card raises "push all 2 to table" (D101)');
+  ok(await evalIn(phone, `(() => {
+    const [a, b] = document.querySelectorAll('.deck-card');
+    const ax = parseFloat(a.style.getPropertyValue('--sx'));
+    const bx = parseFloat(b.style.getPropertyValue('--sx'));
+    // the step itself is an eye-tunable constant; what must hold is the shape
+    return ax < 0 && bx === -ax && a.style.getPropertyValue('--sy') === '0px' && b.style.getPropertyValue('--sy') === '0px';
+  })()`), 'two cards open to the left and right of the pile (D114)');
   await evalIn(phone, `${HELPERS} act('push all')`);
   ok(await evalIn(phone, `${HELPERS} until(() => sheetStatus().includes('2 pushed'), 8000)`, true), 'the phone hears the table take them both');
   ok(await evalIn(phone, `${HELPERS} until(() => !document.querySelectorAll('.deck-card').length
@@ -584,7 +615,7 @@ try {
   await fetch(`http://localhost:${PORT}/json/close/${list[0].id}`);
   await sleep(500);
   await evalIn(phone, `__view.focus()`);
-  await typeLines(phone, ['# a card with nowhere to go', 'the table was closed behind it.']);
+  await typeLines(phone, ['# a card with nowhere to go', 'the table was closed behind @T.']);
   await evalIn(phone, `${HELPERS} act('push to table')`);
   ok(await evalIn(phone, `${HELPERS} until(() => sheetStatus().includes('no table is open in this browser · kept in the deck'), 8000)`, true), 'silence surfaces the dry no-table line — and says where the card went');
   ok(await evalIn(phone, `document.querySelectorAll('.deck-card').length === 1`), 'the deck holds the card — nothing is lost');

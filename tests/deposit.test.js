@@ -9,7 +9,7 @@ import {
   siteCardSvg, linkExcerpt, normalizeUrl, stripExt, slashTokenAt, refLineChange,
   classifyLine, parseDoc, composeDoc, migrateSheet, extractTitle, resolveFront,
   composeArtifact, validateArtifact, allocate, materialize, directSink, pageMeta,
-  hasTitleLine, doorRefusal,
+  hasTitleLine, doorRefusal, deckSpread,
 } from '../js/deposit.js';
 import { createStream } from '../js/stream.js';
 
@@ -119,6 +119,17 @@ test('normalizeUrl (D94): the link prompt forgives a missing scheme, prose stays
   assert.equal(normalizeUrl('not a url'), null, 'spaces are prose');
   assert.equal(normalizeUrl('word'), null, 'no dot, no domain');
   assert.equal(normalizeUrl(''), null);
+});
+
+test('deckSpread (D114): alone grows in place; two to the sides; three to corners; rows after', () => {
+  assert.deepEqual(deckSpread(1), [[0, 0]]);
+  assert.deepEqual(deckSpread(2), [[-1, 0], [1, 0]]);
+  assert.deepEqual(deckSpread(3), [[-1, -1], [1, -1], [0, 1]]);
+  assert.deepEqual(deckSpread(4), [[-1, -1], [1, -1], [-1, 1], [1, 1]]);
+  assert.deepEqual(deckSpread(5), [[-1, -1], [1, -1], [0, 0], [-1, 1], [1, 1]]);
+  assert.deepEqual(deckSpread(6), [[-1, -1], [0, -1], [1, -1], [-1, 1], [0, 1], [1, 1]]);
+  assert.equal(deckSpread(7).length, 7, 'a seventh card still has a place');
+  assert.deepEqual(deckSpread(7)[6], [0, 1], 'the last row centers its lone card');
 });
 
 test("hasTitleLine (D99): any '# ' line — even a bare one being written — hides the title door", () => {
@@ -259,14 +270,14 @@ test('migrateSheet (D96): three tray generations collapse into the doc, blob key
   const v1 = migrateSheet({
     title: 'old card', kind: 'quest', practice: 'music', frontTextId: 'title',
     blocks: [
-      tb('t1', 'body text'),
+      tb('t1', 'body text @Y.'),
       pb('p1', { kind: 'image', name: 'a.png', caption: 'a cut', front: { form: 'crop', src: 'data:x' }, blobKey: 'piece:1' }),
       pb('p2', { kind: 'link', href: 'https://x.test/', caption: 'x.test' }),
       pb('p3', { kind: 'link', href: 'https://y.test/', dismissed: true }),
     ],
   });
   assert.equal(v1.v, 3);
-  assert.deepEqual(v1.docText.split('\n\n'), ['# old card', 'body text', '![a cut](piece:p1)', 'https://x.test/', '<https://y.test/>']);
+  assert.deepEqual(v1.docText.split('\n\n'), ['# old card', 'body text @Y.', '![a cut](piece:p1)', 'https://x.test/', '<https://y.test/>']);
   assert.equal(v1.pieces.length, 1, 'links live in the text, not the registry');
   assert.equal(v1.pieces[0].blobKey, 'piece:1', 'blob keys copy verbatim — recomputing would orphan originals');
   assert.equal(v1.kind, 'quest');
@@ -281,11 +292,11 @@ test('migrateSheet (D96): three tray generations collapse into the doc, blob key
 test('composeArtifact: a lone written line is a closed text card (D88)', () => {
   const { artifact, blobs } = composeArtifact({
     practice: 'writing',
-    blocks: [tb('t1', 'The kiln holds at nine hundred.')],
+    blocks: [tb('t1', 'The kiln holds at nine hundred. @R.')],
   });
   assert.equal(artifact.media, 'text');
-  assert.equal(artifact.excerpt.text, 'The kiln holds at nine hundred.');
-  assert.equal(artifact.title, 'The kiln holds at nine hundred.');
+  assert.equal(artifact.excerpt.text, 'The kiln holds at nine hundred. @R.');
+  assert.equal(artifact.title, 'The kiln holds at nine hundred. @R.');
   assert.equal(artifact.detail, undefined, 'a back that is exactly the front adds nothing — the card stays closed');
   assert.deepEqual(blobs, {});
   assert.equal(validateArtifact(artifact), null);
@@ -344,16 +355,22 @@ test('composeArtifact doors (D72): first audio/video plays, else the first link 
 });
 
 test("composeArtifact: kind rides through — Claude's failure is stored as the failure register", () => {
-  const { artifact } = composeArtifact({ practice: 'music', kind: 'failure', blocks: [tb('t0', '# fugue, again'), tb('t1', 'no use')] });
+  const { artifact } = composeArtifact({ practice: 'music', kind: 'failure', blocks: [tb('t0', '# fugue, again'), tb('t1', 'no use @M.')] });
   assert.equal(artifact.kind, 'failure');
   const s = createStream();
   s.append({ e: 'deposit', night: 0, artifact: { ...artifact, id: 'h-001' } });
 });
 
 test('validateArtifact: the stream speaks the dry line; a sound artifact is quiet', () => {
-  const good = composeArtifact({ practice: 'writing', blocks: [tb('t0', '# x'), tb('t1', 'y')] }).artifact;
+  const good = composeArtifact({ practice: 'writing', blocks: [tb('t0', '# x'), tb('t1', 'y @E.')] }).artifact;
+  assert.deepEqual(good.people, ['E.'], 'an @name is how a hand card says who made it (D118)');
+  assert.match(validateArtifact({ ...good, people: undefined }), /a card needs an author/, 'anonymous is refused, in the sheet as anywhere');
   assert.equal(validateArtifact(good), null);
-  assert.match(validateArtifact({ ...good, title: '' }), /title/);
+  // a card needs a title, a caption, OR a line — any one is enough (D116)
+  assert.equal(validateArtifact({ ...good, title: '' }), null, 'its own line still carries it');
+  assert.equal(validateArtifact({ ...good, title: '', caption: 'M. + Claude' }), null);
+  assert.match(validateArtifact({ ...good, title: '', caption: undefined, excerpt: { form: 'words' } }),
+    /a card needs a title, a caption, or a line of its own/, 'nothing readable at all is refused');
   assert.match(validateArtifact({ ...good, practice: '' }), /practice/);
   assert.match(validateArtifact(composeArtifact({ blocks: [] }).artifact), /media/);
 });
@@ -386,16 +403,17 @@ test('materialize: composition slots become URLs at the table, nothing else move
 test('directSink: allocates, appends, and lets the stream refuse (D85)', () => {
   const s = createStream();
   s.append({ e: 'deposit', night: 3, artifact: {
-    id: 'a-001', media: 'note', kind: 'quest', title: 'q', practice: 'p',
+    id: 'a-001', media: 'note', kind: 'quest', title: 'q', practice: 'p', people: ['R.'],
     provenance: 'curator', visibility: 'public', excerpt: { form: 'words', text: 'q' },
   } });
   const sink = directSink(s);
-  const bare = composeArtifact({ practice: 'writing', blocks: [tb('t0', '# x'), tb('t1', 'a line of it')] }).artifact;
+  const bare = composeArtifact({ practice: 'writing', blocks: [tb('t0', '# x'), tb('t1', 'a line of it @E.')] }).artifact;
   sink.deposit(bare, {});
   sink.deposit({ ...bare, title: 'x2' }, {});
   const ids = s.all().filter((e) => e.e === 'deposit').map((e) => e.artifact.id);
   assert.deepEqual(ids, ['a-001', 'h-001', 'h-002'], 'each lay takes the next h-number');
   assert.equal(s.all().at(-1).night, 3, 'hand deposits join the current night');
-  assert.throws(() => sink.deposit({ ...bare, title: '' }, {}), /title/, 'rejected, never coerced');
+  assert.throws(() => sink.deposit({ ...bare, title: '', caption: undefined, excerpt: { form: 'words' } }, {}),
+    /a card needs a title, a caption, or a line of its own/, 'rejected, never coerced');
   assert.equal(s.all().length, 3, 'a refused deposit leaves no trace');
 });

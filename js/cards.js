@@ -2,6 +2,7 @@
 // The desk attests; it never performs: every trace is a still, text is textContent, never markup.
 
 import { fnv1a, mulberry32 } from './fold.js';
+import { isPlace } from './stream.js';
 
 // Every sheet's corners are cut a little differently. Deterministic per card (D24):
 // elliptical per-corner radii hashed from the id — salted so the corner draw can
@@ -24,7 +25,7 @@ export function cornerRadii(id) {
 function img(artifact, className = '') {
   const el = document.createElement('img');
   el.src = artifact.excerpt.src;
-  el.alt = artifact.title;
+  el.alt = artifact.title ?? artifact.caption ?? '';
   el.draggable = false;
   if (className) el.className = className;
   return el;
@@ -58,7 +59,7 @@ function codeTrace(artifact) {
 function wordsTrace(artifact) {
   const el = document.createElement('div');
   el.className = 'trace--words';
-  el.textContent = artifact.excerpt.text ?? artifact.title;
+  el.textContent = artifact.excerpt.text ?? artifact.title ?? '';
   return el;
 }
 
@@ -103,7 +104,11 @@ export function backModel(artifact) {
 // The back renders the maker's arrangement: quiet text, stills of the pieces
 // (§5 sanctions the full image on a back), links and files as plain outward
 // lines — never embedded players (D30); the door alone summons (D72).
+// The stream refuses a door that is not a place (D127); the renderer refuses
+// it a second time, because a back is built from whatever a maker arranged and
+// this is the one spot where that arrangement becomes a click.
 function line(text, href, download = null) {
+  if (!isPlace(href)) return null;
   const a = document.createElement('a');
   a.className = 'back__line';
   a.href = href;
@@ -140,7 +145,7 @@ function buildBack(model) {
   // back itself is the window, and the player (D75) covers it whole
   const flow = document.createElement('div');
   flow.className = 'back__flow';
-  const append = (node) => flow.append(node);
+  const append = (node) => { if (node) flow.append(node); }; // a refused line is simply absent (D127)
 
   if (model.title) {
     const title = document.createElement('div');
@@ -228,16 +233,25 @@ export function renderCard(artifact) {
   const trace = document.createElement('div');
   trace.className = 'card__trace';
   trace.append((TRACES[artifact.media] ?? img)(artifact));
+  // A take says it is a take (D119): the strip alone reads as three photographs.
+  // A mark, not a control — the gesture is still the turn, and the door on the
+  // back is what summons it (D72/D75).
+  if (artifact.media === 'video') {
+    const mark = document.createElement('div');
+    mark.className = 'trace__play';
+    trace.append(mark);
+  }
   front.append(trace);
 
   // Words shown whole never repeat as a title (D40, generalized): a note whose
   // words are the title, or a text/code excerpt identical to it, carries the
   // line once — a quest is its own title, a lone sentence its own card.
+  const titleText = (artifact.title ?? '').trim(); // a card may carry no title at all (D116)
   const wordsAreTitle =
-    (artifact.media === 'note' && (artifact.excerpt.text ?? artifact.title).trim() === artifact.title.trim())
+    (artifact.media === 'note' && (artifact.excerpt.text ?? artifact.title ?? '').trim() === titleText)
     || ((artifact.media === 'text' || artifact.media === 'code')
-      && (artifact.excerpt.text ?? '').trim() === artifact.title.trim());
-  if (!wordsAreTitle) {
+      && (artifact.excerpt.text ?? '').trim() === titleText);
+  if (titleText && !wordsAreTitle) {
     const title = document.createElement('div');
     title.className = 'card__title';
     title.textContent = artifact.title;

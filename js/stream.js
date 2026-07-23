@@ -8,7 +8,22 @@ const FORMS = ['crop', 'waveform', 'frames', 'sentence', 'lines', 'linework', 'r
 const PROVENANCES = ['mcp', 'hand', 'curator']; // doors, never media (D65)
 const VISIBILITIES = ['room', 'community', 'public'];
 
-const isFilled = (v) => typeof v === 'string' && v.length > 0;
+// Blank is not filled: a title of one space is not something a reader can
+// read, and the door's own helper has always trimmed — one meaning, one name.
+const isFilled = (v) => typeof v === 'string' && v.trim().length > 0;
+
+// A place the desk may point at (D127): a file it laid (a relative path), a
+// page on the web, or a blob a door materialized. Anything else — javascript:,
+// data:, file: — is not a destination, and no card may carry one into a click.
+// Control characters are stripped before the test: browsers ignore them inside
+// a URL, so `java\nscript:` is `javascript:` to everyone but a naive regex.
+export function isPlace(v) {
+  if (typeof v !== 'string') return false;
+  const bare = v.replace(/[\u0000-\u0020]/g, '');
+  if (!bare) return false;
+  if (/^(https?:|blob:)/i.test(bare)) return true;
+  return !/^[a-z][a-z0-9+.-]*:/i.test(bare); // no scheme at all: ours, relative
+}
 const reject = (msg) => { throw new Error(`stream reject: ${msg}`); };
 
 export function createStream() {
@@ -27,7 +42,12 @@ export function createStream() {
       if (artifacts.has(a.id)) reject(`duplicate id ${a.id}`);
       if (!MEDIA.includes(a.media)) reject(`unknown media "${a.media}"`);
       if (!KINDS.includes(a.kind)) reject(`unknown kind "${a.kind}"`);
-      if (!isFilled(a.title)) reject('artifact needs a title');
+      // A card must carry something readable — but which one is the maker's
+      // choice (D116): a title, a caption, or a line of the work itself. A
+      // photograph captioned "one phone, six hands · the walk" needs no title.
+      if (!isFilled(a.title) && !isFilled(a.caption) && !isFilled(a.excerpt?.text)) {
+        reject('a card needs a title, a caption, or a line of its own');
+      }
       // D17 amended 2026-07-22: practice is optional at the door — the seed and
       // the curator still fill it; if present it must carry a word.
       if (a.practice !== undefined && !isFilled(a.practice)) reject('practice, if present, must be a non-empty string');
@@ -38,14 +58,20 @@ export function createStream() {
       // excerpt.src / excerpt.text stay optional: withheld is legal (D6), absent excerpt is not.
       if (a.caption !== undefined && !isFilled(a.caption)) reject('caption, if present, must be a non-empty string');
       if (a.people !== undefined && !(Array.isArray(a.people) && a.people.every(isFilled))) reject('people must be strings');
+      // Every card says who made it (D118) — any name, the maker's own choice
+      // of how to be named. Nothing arrives on this table anonymously.
+      if (!(Array.isArray(a.people) && a.people.some(isFilled))) reject('a card needs an author — any name');
       if (a.detail !== undefined) {
-        if (typeof a.detail !== 'object') reject('detail must be an object');
+        // an array is an object to typeof, and nothing a back is made of
+        if (typeof a.detail !== 'object' || a.detail === null || Array.isArray(a.detail)) reject('detail must be an object');
         const ex = a.detail.experience; // D72: one experience per back, depositor-set
         if (ex !== undefined) {
           if (!ex || typeof ex !== 'object') reject('experience must be an object');
           if (!['play', 'visit'].includes(ex.mode)) reject(`unknown experience mode "${ex?.mode}"`);
           if (!isFilled(ex.src)) reject('experience needs a src — the door must lead somewhere');
+          if (!isPlace(ex.src)) reject('a door leads to a file or a page — not to a script');
           if (ex.demoSrc !== undefined && !isFilled(ex.demoSrc)) reject('demoSrc, if present, must be a non-empty string');
+          if (ex.demoSrc !== undefined && !isPlace(ex.demoSrc)) reject('a door leads to a file or a page — not to a script');
         }
       }
       return;
