@@ -131,13 +131,27 @@ const HELPERS = `
     el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));    // the one that takes
     el.click();
   };
-  globalThis.tapCard = (id) => {
+  globalThis.tapOnce = (id) => {
     const el = document.querySelector('[data-id="' + id + '"]');
     const r = el.getBoundingClientRect();
     const at = { bubbles: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 };
     el.dispatchEvent(new PointerEvent('pointerdown', at));
     el.dispatchEvent(new PointerEvent('pointerup', at));
     el.dispatchEvent(new MouseEvent('click', at));
+  };
+  // A card in a studio's pile takes the two-beat: the first tap spreads the
+  // pile, the second takes the card. A card lying alone takes one. This helper
+  // reaches the card either way — the gesture itself is drilled in pile-e2e.
+  // Spreading is synchronous (the fold re-settles at once); the flip is queued.
+  // So if the card moved on this tap, the tap opened its pile — take the second
+  // beat. If it did not, the tap already went to the card.
+  globalThis.tapCard = (id) => {
+    // the settled style, not the rendered box: the spread transitions, so the
+    // box still reads the old place for a moment, but the style is already true
+    const at = () => document.querySelector('[data-id="' + id + '"]').style.transform;
+    const before = at();
+    tapOnce(id);
+    if (at() !== before) tapOnce(id);
   };
   globalThis.dragCard = (id) => {
     const el = document.querySelector('[data-id="' + id + '"]');

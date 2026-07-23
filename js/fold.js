@@ -91,8 +91,14 @@ const PILE_STEP_Y = 0.008;
 // between its makers — that midpoint is very often exactly where somebody else
 // is standing. Deterministic: a fixed number of steps, a hashed direction to
 // break ties, no randomness.
-const FLOAT_STEPS = 60;
-const FLOAT_CLEAR = 0.045; // canonical gap it tries to keep from anything else
+// Measured on the castle table (?castle: 25 people, 101 cards, 27 shared
+// works): 60 steps at 0.045 left 34 covered caption strips, 240 at 0.065 leaves
+// 16. Clearance is bought with distance — the shared work is pushed further from
+// the hands that made it, so its threads run longer. Capping that drift was
+// tried and is worse on both counts (57 covered at a 0.16 cap), because 26
+// studios and 19 shared places genuinely need the whole table.
+const FLOAT_STEPS = 240;
+const FLOAT_CLEAR = 0.065; // canonical gap it tries to keep from anything else
 
 function settleFloats(floats, fixed) {
   for (let step = 0; step < FLOAT_STEPS; step++) {
