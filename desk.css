@@ -255,15 +255,39 @@ html.rig, html.rig body { cursor: none; }
   height: 1.5em;
 }
 
+/* Both marks are drawn, not typed: one box, one colour, one optical weight, so
+   the line beside them does not shift when the mark changes under a press. */
 .play__mark {
-  font-size: 0.6em;
-  line-height: 1;
-  color: #6f5a33;
-  user-select: none;
-  cursor: pointer;
-  width: 1.1em; /* ▶ and ▮▮ are different widths — the line must not shift under the press */
-  text-align: center;
   flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.16em;
+  width: 1em;
+  height: 0.85em;
+  cursor: pointer;
+  user-select: none;
+}
+
+.play__mark::before, .play__mark::after { content: ''; display: block; }
+
+.play__mark[data-mark="play"]::before {
+  width: 0;
+  height: 0;
+  margin-left: 0.12em; /* a triangle's optical centre is left of its bounding box */
+  border-left: 0.62em solid #6f5a33;
+  border-top: 0.38em solid transparent;
+  border-bottom: 0.38em solid transparent;
+}
+
+.play__mark[data-mark="play"]::after { display: none; }
+
+.play__mark[data-mark="pause"]::before,
+.play__mark[data-mark="pause"]::after {
+  width: 0.19em;
+  height: 0.72em;
+  border-radius: 0.5px;
+  background: #6f5a33;
 }
 
 .play__line {

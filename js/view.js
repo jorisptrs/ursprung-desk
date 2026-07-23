@@ -175,21 +175,25 @@ export function createView(field, { rig = false } = {}) {
   // Never the bare point, which is the middle of the stack and would run the
   // string in under the cards and out the other side.
   const MARK_GAP = 5; // px of air between the string and what it points at
-  function placeBoxPx(thread, state) {
+  function placeBoxPx(thread, state, from) {
     const [px, py] = thread.toPlace;
     const cx = px * rect.w;
     const cy = py * rect.h;
     const bare = { cx, cy, x1: cx, y1: cy, x2: cx, y2: cy };
 
+    // The card of that pile the string actually meets, not the box around all of
+    // them: a pile cascades, so its bounding box has empty corners, and stopping
+    // at one of those leaves the string ending in mid-air beside the stack.
     const mine = state.cards.filter((c) => (c.pile ?? c.between) === thread.toStack);
     if (mine.length) {
-      const box = { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity };
-      for (const c of mine) {
-        const b = cardBoxPx(c);
-        box.x1 = Math.min(box.x1, b.x1); box.y1 = Math.min(box.y1, b.y1);
-        box.x2 = Math.max(box.x2, b.x2); box.y2 = Math.max(box.y2, b.y2);
-      }
-      return { cx, cy, x1: box.x1 - MARK_GAP, y1: box.y1 - MARK_GAP, x2: box.x2 + MARK_GAP, y2: box.y2 + MARK_GAP };
+      const boxes = mine.map((c) => cardBoxPx(c));
+      const near = boxes.reduce((best, b) =>
+        (Math.hypot(b.cx - from.cx, b.cy - from.cy) < Math.hypot(best.cx - from.cx, best.cy - from.cy) ? b : best));
+      return {
+        cx, cy,
+        x1: near.x1 - MARK_GAP, y1: near.y1 - MARK_GAP,
+        x2: near.x2 + MARK_GAP, y2: near.y2 + MARK_GAP,
+      };
     }
 
     const el = markEls.get(thread.toStack);
@@ -407,7 +411,7 @@ export function createView(field, { rig = false } = {}) {
     // the studio stands empty its name is written there, so the thread backs off
     // that name's own box rather than running through the letters.
     const B = thread.toPlace
-      ? placeBoxPx(thread, state)
+      ? placeBoxPx(thread, state, A)
       : cardBoxPx(byId.get(thread.to) ?? {});
     if (!thread.toPlace && !byId.get(thread.to)) return null;
     const dx = B.cx - A.cx;
@@ -720,7 +724,7 @@ export function createView(field, { rig = false } = {}) {
     if (!media) return;
     const done = media.duration > 0 ? media.currentTime / media.duration : 0;
     wrap.querySelector('.play__run').style.width = `${(done * 100).toFixed(2)}%`;
-    wrap.querySelector('[data-mark]').textContent = media.paused ? '▶' : '▮▮';
+    wrap.querySelector('[data-mark]').dataset.mark = media.paused ? 'play' : 'pause';
     const left = wrap.querySelector('[data-at]');
     left.textContent = media.duration > 0 ? clock(media.duration - media.currentTime) : '';
   }
