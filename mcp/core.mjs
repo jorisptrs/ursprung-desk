@@ -332,7 +332,6 @@ export function buildArtifact(input) {
   // the author is always on the front (D88's rule, kept at this door too)
   if (isFilled(input.caption)) a.caption = input.caption;
   else if (a.people?.length && a.people.every(isFilled)) a.caption = a.people.join(' + ');
-  if (isFilled(input.practice)) a.practice = input.practice; // optional at the door (D95)
 
   const ex = input.excerpt ?? {};
   a.excerpt = { form: ex.form ?? FORM_FOR[input.media] };

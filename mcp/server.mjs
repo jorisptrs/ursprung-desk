@@ -57,7 +57,6 @@ const INPUT = z.object({
   title: z.string().optional().describe('a plain noun phrase, often "thing, state"'),
   caption: z.string().optional().describe('fragments joined by " · " — medium, state, credit'),
   people: z.array(z.string()).optional().describe('required — who made the work; initials are the house style, Claude only where Claude was in it'),
-  practice: z.string().optional().describe("the craft, in the depositor's own word"),
   excerpt: z.object({
     path: z.string().optional().describe('the file on this machine — a still is used as it is, a recording or take is cut'),
     bytes: z.string().optional().describe('the file itself, base64 — for a desk across the network, where a path means nothing'),

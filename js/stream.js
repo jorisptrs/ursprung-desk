@@ -48,9 +48,6 @@ export function createStream() {
       if (!isFilled(a.title) && !isFilled(a.caption) && !isFilled(a.excerpt?.text)) {
         reject('a card needs a title, a caption, or a line of its own');
       }
-      // D17 amended 2026-07-22: practice is optional at the door — the seed and
-      // the curator still fill it; if present it must carry a word.
-      if (a.practice !== undefined && !isFilled(a.practice)) reject('practice, if present, must be a non-empty string');
       if (!PROVENANCES.includes(a.provenance)) reject(`unknown provenance "${a.provenance}"`);
       if (!VISIBILITIES.includes(a.visibility)) reject(`unknown visibility "${a.visibility}"`);
       if (!a.excerpt || typeof a.excerpt !== 'object') reject('artifact needs an excerpt — it is the surface');

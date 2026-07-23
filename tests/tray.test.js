@@ -18,7 +18,7 @@ function memoryBackend() {
   };
 }
 
-const art = (title) => ({ media: 'text', kind: 'work', title, practice: 'writing', people: ['E.'], provenance: 'hand', visibility: 'public', excerpt: { form: 'sentence', text: 'y' } });
+const art = (title) => ({ media: 'text', kind: 'work', title, people: ['E.'], provenance: 'hand', visibility: 'public', excerpt: { form: 'sentence', text: 'y' } });
 
 test('token: minted once, then possession is identity', async () => {
   const backend = memoryBackend();
@@ -85,11 +85,11 @@ test('commit with the door\'s own rule (D101): a card it holds back is never off
   await tray.stage({ artifact: art('let through') });
 
   const seen = [];
-  const refuse = (entry) => (entry.artifact.title === 'kept back' ? 'this one names no practice' : null);
+  const refuse = (entry) => (entry.artifact.title === 'kept back' ? 'the door held this one back' : null);
   const { laid, rejected } = await tray.commit({ deposit: (a) => seen.push(a.title) }, refuse);
 
   assert.deepEqual(seen, ['let through'], 'the sink never saw the held card');
   assert.deepEqual(laid.map((e) => e.artifact.title), ['let through']);
-  assert.deepEqual(rejected, [{ id: rejected[0].id, title: 'kept back', reason: 'this one names no practice' }]);
+  assert.deepEqual(rejected, [{ id: rejected[0].id, title: 'kept back', reason: 'the door held this one back' }]);
   assert.deepEqual((await tray.list()).map((e) => e.artifact.title), ['kept back'], 'and it stays in the deck, untouched');
 });

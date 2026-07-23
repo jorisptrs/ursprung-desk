@@ -157,8 +157,7 @@ try {
   const t0 = Date.now();
   const res = await door.deposit({
     media: 'text', kind: 'work', title: 'the zither, restrung',
-    caption: 'strings · Y. + Claude', people: ['Y.', 'Claude'], practice: 'instrument building',
-    excerpt: { text: 'the third course held tune for the first time.' },
+    caption: 'strings · Y. + Claude', people: ['Y.', 'Claude'],     excerpt: { text: 'the third course held tune for the first time.' },
   });
   ok(said(res) === 'm-001 · laid — the table has it', `the door answers dryly: ${said(res)}`);
   const landed = await evalIn(table, `${HELPERS} until(() => card('m-001'), 6000)`, true);

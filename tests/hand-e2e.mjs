@@ -182,7 +182,7 @@ try {
   await press(table, 'Backspace');
   ok((await evalIn(table, `docText()`)) === '', 'and trusted keys edit it');
 
-  ok(await evalIn(table, `document.querySelector('[placeholder^="origami"]').offsetParent === null`), 'practice exists nowhere until a failure is flagged (D98)');
+  ok(await evalIn(table, `!document.querySelector('[placeholder^="origami"]')`), 'the sheet asks for no craft at all — the work says what it is');
   ok(await evalIn(table, `(() => {
     const opts = [...document.querySelectorAll('.sheet__opt')].filter((e) => e.offsetParent !== null);
     const flag = document.querySelector('.sheet__flag');
@@ -483,7 +483,7 @@ try {
   // the slash menu: everything on offer, Esc closes only itself
   await insert(phone, '/');
   ok((await evalIn(phone, `${HELPERS} until(() => document.querySelectorAll('.cm-tooltip-autocomplete li').length === 7, 3000)`, true)), 'a bare / offers the seven doors — no registers hiding in it (D98)');
-  ok(!(await evalIn(phone, `[...document.querySelectorAll('.cm-tooltip-autocomplete li')].map((li) => li.textContent).join('|')`)).match(/work|quest|failure|practice/), 'registers and practice left the menu (D98)');
+  ok(!(await evalIn(phone, `[...document.querySelectorAll('.cm-tooltip-autocomplete li')].map((li) => li.textContent).join('|')`)).match(/work|quest|failure/), 'registers left the menu (D98)');
   await press(phone, 'Escape');
   ok(await evalIn(phone, `!document.querySelector('.cm-tooltip-autocomplete') && !!document.querySelector('.sheet--page .editor')`), 'Esc closes the menu and nothing else');
   await evalIn(phone, `clearDoc()`);
@@ -497,7 +497,7 @@ try {
   ok(await evalIn(phone, `${HELPERS} until(() => docText().includes('<http://localhost:8123/>') && !document.querySelector('.link-preview'), 3000)`, true), 'clicking the preview away leaves the plain link');
   await evalIn(phone, `clearDoc()`);
 
-  // a recording: waveform still, md title, /practice as the side door
+  // a recording: waveform still, md title
   await evalIn(phone, `${HELPERS} (() => {
     const rate = 8000, n = rate;
     const buf = new ArrayBuffer(44 + n * 2); const v = new DataView(buf);
@@ -531,10 +531,7 @@ try {
   await insert(phone, 'by @B.'); // every card names its author (D118)
   await press(phone, 'Enter');
   await evalIn(phone, `document.querySelector('.sheet__flag').click()`);
-  ok(await evalIn(phone, `document.querySelector('.sheet__flag').classList.contains('sheet__opt--on') && document.querySelector('[placeholder^="origami"]').offsetParent !== null`), 'flagging the failure raises the practice field, required (D98)');
-  await evalIn(phone, `${HELPERS} act('push to table')`);
-  ok((await evalIn(phone, `sheetStatus()`)).includes('names its practice'), 'a flagged failure will not reach the table nameless (D99)');
-  await evalIn(phone, `${HELPERS} set('[placeholder^="origami"]', 'music')`);
+  ok(await evalIn(phone, `document.querySelector('.sheet__flag').classList.contains('sheet__opt--on')`), 'the flag stands, and asks nothing further of anyone');
   ok(await evalIn(phone, `${HELPERS} until(() => !!document.querySelector('.sheet__face .card--audio.kind--failure'), 4000)`, true), 'the front previews the ashen register (D95/D98)');
   await sleep(400);
   const shot1 = await phone.send('Page.captureScreenshot', { format: 'png' });
@@ -562,9 +559,9 @@ try {
     const tx = db.transaction('entries', 'readwrite');
     tx.objectStore('entries').put({
       id: 's-99', seq: 99,
-      artifact: { media: 'text', kind: 'work', title: 'old card', practice: 'music', people: ['Y.'], provenance: 'hand', visibility: 'public', excerpt: { form: 'sentence', text: 'the body line @Y.' } },
+      artifact: { media: 'text', kind: 'work', title: 'old card', people: ['Y.'], provenance: 'hand', visibility: 'public', excerpt: { form: 'sentence', text: 'the body line @Y.' } },
       blobs: {},
-      sheet: { title: 'old card', kind: 'work', practice: 'music', frontTextId: 'title', blocks: [{ id: 't1', t: 'text', text: 'the body line @Y.' }] },
+      sheet: { title: 'old card', kind: 'work', frontTextId: 'title', blocks: [{ id: 't1', t: 'text', text: 'the body line @Y.' }] },
     });
     await new Promise((res) => { tx.oncomplete = res; });
     db.close();
