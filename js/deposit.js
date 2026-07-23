@@ -67,32 +67,46 @@ export function inferWordsMedia(text) {
 // Peters" reads the longer one. Everyone else still parses the simple way,
 // because someone in a studio may not be in the cohort at all — and the
 // preview shows what was read either way.
-export function parseMentions(texts, roster = []) {
+// Where each mention stands, and what name it names — one reading, used both to
+// credit the card and to draw the pill under the pen, so the two can never
+// disagree about where a name ends. That mattered once a name could hold a
+// space: the pill stopped at "@Joris" while the card was filed under "Joris
+// Peters", which looks exactly like the name not being recognized.
+export function mentionSpans(text, roster = []) {
   const known = [...new Set((roster ?? []).map((n) => String(n ?? '').trim()).filter(Boolean))]
     .sort((a, b) => b.length - a.length);
-  const people = [];
-  const take = (name) => { if (name && !people.includes(name)) people.push(name); };
-
-  for (const t of Array.isArray(texts) ? texts : [texts]) {
-    const s = String(t ?? '');
-    for (let i = s.indexOf('@'); i >= 0; i = s.indexOf('@', i + 1)) {
-      const rest = s.slice(i + 1);
-      const hit = known.find((n) => rest.slice(0, n.length).toLowerCase() === n.toLowerCase()
-        // a name ends where a word ends: "@Ana" must not swallow "@Anastasia"
-        && !/[\p{L}\d]/u.test(rest.charAt(n.length)));
-      if (hit) {
-        take(hit);
-        i += hit.length;
-        continue;
-      }
-      const m = /^([\p{L}][\p{L}\d._'-]*)/u.exec(rest);
-      if (!m) continue;
-      let name = m[1];
-      // a sentence's full stop is not part of the name — initials keep theirs
-      if (name.endsWith('.') && !/^(\p{L}\.)+$/u.test(name)) name = name.slice(0, -1);
-      take(name);
-      i += m[1].length;
+  const s = String(text ?? '');
+  const out = [];
+  for (let i = s.indexOf('@'); i >= 0; i = s.indexOf('@', i + 1)) {
+    // a mention begins a word. Without this an address is a person:
+    // "me@here.org" credited the card to here.org, which is the sort of thing
+    // nobody notices until a card is filed under a domain name.
+    if (/[\p{L}\d]/u.test(s.charAt(i - 1))) continue;
+    const rest = s.slice(i + 1);
+    const hit = known.find((n) => rest.slice(0, n.length).toLowerCase() === n.toLowerCase()
+      // a name ends where a word ends: "@Ana" must not swallow "@Anastasia"
+      && !/[\p{L}\d]/u.test(rest.charAt(n.length)));
+    if (hit) {
+      out.push({ at: i, len: hit.length + 1, name: hit });
+      i += hit.length;
+      continue;
     }
+    const m = /^([\p{L}][\p{L}\d._'-]*)/u.exec(rest);
+    if (!m) continue;
+    let name = m[1];
+    let len = m[1].length;
+    // a sentence's full stop is not part of the name — initials keep theirs
+    if (name.endsWith('.') && !/^(\p{L}\.)+$/u.test(name)) { name = name.slice(0, -1); len -= 1; }
+    out.push({ at: i, len: len + 1, name });
+    i += m[1].length;
+  }
+  return out;
+}
+
+export function parseMentions(texts, roster = []) {
+  const people = [];
+  for (const t of Array.isArray(texts) ? texts : [texts]) {
+    for (const m of mentionSpans(t, roster)) if (!people.includes(m.name)) people.push(m.name);
   }
   return people;
 }
@@ -444,8 +458,14 @@ export function composeArtifact({ kind = 'work', blocks: rawBlocks = [], frontPi
     .filter((b) => b.t !== 'text' || b.text);
   const { piece, textBlock } = resolveFront({ title, blocks, frontPieceId, frontTextId });
   const frontText = textBlock ? textBlock.text.trim() : title.trim();
-  // the signature is read for its names before it is dropped
-  const people = parseMentions(written.filter((b) => b.t === 'text').map((b) => b.text), roster);
+  // Everywhere a name can be written, in the order it is read down the page:
+  // the title line, the writing, and the caption a piece carries. The title and
+  // the captions were being missed, so "# the zither, with @Y." filed the card
+  // under nobody. The signature is read here too, before it is dropped.
+  const people = parseMentions([
+    title,
+    ...written.map((b) => (b.t === 'text' ? b.text : (b.p?.caption ?? ''))),
+  ], roster);
 
   const artifact = {
     kind,
@@ -770,7 +790,16 @@ export function linkToPiece(href) {
 
 // ---- the sheet: one page, one editor, one front (D96) ----
 
-const KIND_LABELS = { work: 'work', failure: "Claude's failure", quest: 'quest' };
+// What each register is for, in the depositor's terms (keeper's ruling). The
+// third was called "Claude's failure", which asked people to file a verdict —
+// and half of what is worth recording there is Claude being surprisingly
+// useful. It is a note about working with Claude, either way.
+const KIND_LABELS = { work: 'work', quest: 'quest', failure: 'note on Claude' };
+const KIND_MEANS = {
+  work: 'an output, finished or half-way',
+  quest: 'an intention, or a challenge you could use help on',
+  failure: 'a case where Claude let you down or was surprisingly helpful',
+};
 
 const h = (tag, cls, text) => {
   const node = document.createElement(tag);
@@ -899,11 +928,13 @@ export function openSheet({
   const kindEls = new Map();
   for (const k of ['work', 'quest']) {
     const opt = h('span', 'sheet__opt', KIND_LABELS[k]);
+    opt.title = KIND_MEANS[k]; // what it is for, on hover — never printed on the table
     opt.addEventListener('click', () => { state.kind = k; syncMeta(); refreshPreviews(); });
     kindEls.set(k, opt);
     kindRow.append(opt);
   }
-  const flag = h('span', 'sheet__opt sheet__flag', "flag Claude's failure");
+  const flag = h('span', 'sheet__opt sheet__flag', KIND_LABELS.failure);
+  flag.title = KIND_MEANS.failure;
   flag.addEventListener('click', () => {
     state.kind = state.kind === 'failure' ? 'work' : 'failure';
     syncMeta();

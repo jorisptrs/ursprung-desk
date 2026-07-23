@@ -9,7 +9,7 @@ import {
   siteCardSvg, linkExcerpt, normalizeUrl, stripExt, slashTokenAt, refLineChange,
   classifyLine, parseDoc, composeDoc, migrateSheet, extractTitle, resolveFront,
   composeArtifact, validateArtifact, allocate, materialize, directSink, pageMeta,
-  hasTitleLine, doorRefusal, deckSpread, withoutSignature,
+  hasTitleLine, doorRefusal, deckSpread, withoutSignature, mentionSpans,
 } from '../js/deposit.js';
 import { createStream } from '../js/stream.js';
 
@@ -49,7 +49,35 @@ test('inferWordsMedia: a line is manuscript; braces over lines are code', () => 
 test('parseMentions: @names read from the text as written, in order, deduped', () => {
   assert.deepEqual(parseMentions(['with @E. and @Claude', 'again @Claude, then @R.']), ['E.', 'Claude', 'R.']);
   assert.deepEqual(parseMentions('no one here'), []);
-  assert.deepEqual(parseMentions('mail@example.com is not a person… but @Ana is'), ['example.com', 'Ana'], 'the parser is simple on purpose — the preview shows what it read');
+  // a mention begins a word, so an address is not a person (D164)
+  assert.deepEqual(parseMentions('mail@example.com is not a person… but @Ana is'), ['Ana']);
+  assert.deepEqual(parseMentions('foo@Y. bar'), [], 'nor is anything hanging off the end of one');
+});
+
+test('a name is read wherever it is written, and the pill ends where it does (D164)', () => {
+  const roster = ['E.', 'Y.', 'Joris Peters', 'Ana', 'Anastasia'];
+  // inline, in every shape a sentence puts around it
+  for (const line of ['the third course held tune, @Y. showed me the trick', 'thanks @Y.', 'a note (@E.) in passing',
+    'see @E.: it holds', 'ask @Y.!', '“@E.” said so', 'the @E. version']) {
+    assert.ok(parseMentions([line], roster).length, `missed the name in: ${line}`);
+  }
+  // a name the room knows may hold a space, and the pill covers all of it
+  assert.deepEqual(parseMentions(['with @Joris Peters on the bench'], roster), ['Joris Peters']);
+  const [span] = mentionSpans('with @Joris Peters on the bench', roster);
+  assert.deepEqual([span.at, span.len, span.name], [5, 13, 'Joris Peters'], '@ + the whole name');
+  // longest first, so one name never swallows another
+  assert.deepEqual(parseMentions(['@Anastasia and @Ana'], roster), ['Anastasia', 'Ana']);
+  // and the reading the pill is drawn from is the reading the card is credited from
+  assert.deepEqual(mentionSpans('made by @E.,@Y.', roster).map((m) => m.name), ['E.', 'Y.']);
+  assert.deepEqual(mentionSpans('me@here.org and ask @Y.', roster).map((m) => m.name), ['Y.']);
+});
+
+test('a name in the title or a piece’s caption counts too (D164)', () => {
+  const people = (blocks) => composeArtifact({ blocks, roster: ['E.', 'Y.'] }).artifact.people ?? [];
+  assert.deepEqual(people([{ id: 't1', t: 'text', text: '# the zither, with @Y.\n\nrestrung twice' }]), ['Y.'],
+    'the title line is text a person writes a name in');
+  assert.deepEqual(people([{ id: 'p1', t: 'piece', p: { kind: 'image', caption: 'six hands, @Y. among them', name: 'a.png', blob: 'B', front: { form: 'crop', src: null } } }]), ['Y.'],
+    'and so is a caption');
 });
 
 test('soleUrl: a lone http(s) URL and nothing else', () => {

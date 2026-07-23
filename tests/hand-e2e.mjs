@@ -200,9 +200,10 @@ try {
   ok(await evalIn(table, `(() => {
     const opts = [...document.querySelectorAll('.sheet__opt')].filter((e) => e.offsetParent !== null);
     const flag = document.querySelector('.sheet__flag');
-    return opts.map((e) => e.textContent).join('|') === "work|quest|flag Claude's failure"
+    return opts.map((e) => e.textContent).join('|') === 'work|quest|note on Claude'
+      && opts.every((e) => (e.title || '').length > 20) // each says what it is for, on hover (D165)
       && flag.getBoundingClientRect().right > document.querySelector('.sheet__opt').getBoundingClientRect().right + 100;
-  })()`), "work · quest stand open; the flag waits at the line's far right (D98)");
+  })()`), "work · quest stand open; the note on Claude waits at the line's far right (D98/D165)");
   ok(await evalIn(table, `getComputedStyle(document.querySelector('.editor')).backgroundColor === 'rgb(222, 209, 182)'`), 'the editor is the parchment back itself (D95)');
   ok(await evalIn(table, `getComputedStyle(document.querySelector('.sheet__deck')).display === 'none'`), 'empty deck stays hidden');
 

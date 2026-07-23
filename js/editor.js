@@ -15,7 +15,7 @@ import {
   defaultKeymap, history, historyKeymap,
   autocompletion, completionStatus, closeCompletion,
 } from '../vendor/codemirror.js';
-import { classifyLine, slashTokenAt, normalizeUrl, soleUrl } from './deposit.js';
+import { classifyLine, slashTokenAt, normalizeUrl, soleUrl, mentionSpans } from './deposit.js';
 
 const setFront = StateEffect.define();
 const metaArrived = StateEffect.define();
@@ -173,11 +173,10 @@ class LinkWidget extends WidgetType {
 // ---- the preview: rendered away, raw (with dimmed machinery) under the pen ----
 
 const TITLE_LINE = /^# .*\S/;
-const MENTION = /@[\p{L}][\p{L}\d._'-]*/gu;
 const INLINE_URL = /https?:\/\/\S+/g;
 
 // Exported for node tests: EditorState runs without a DOM.
-export function buildPreview(state, registry, front, host) {
+export function buildPreview(state, registry, front, host, roster = []) {
   const builder = new RangeSetBuilder();
   const sel = state.selection.main;
   const focusValue = state.field(focusField, false);
@@ -196,8 +195,10 @@ export function buildPreview(state, registry, front, host) {
         if (touched) adds.push([line.from, line.from + 2, Decoration.mark({ class: 'desk-syntax' })]);
         else adds.push([line.from, line.from + 2, Decoration.replace({})]); // the marks hide when the pen leaves (D98)
       }
-      for (const m of line.text.matchAll(MENTION)) {
-        adds.push([line.from + m.index, line.from + m.index + m[0].length, Decoration.mark({ class: 'desk-mention' })]);
+      // the same reading the card is credited from, so the pill ends where the
+      // name does — spaces and all, for a name the room knows
+      for (const m of mentionSpans(line.text, roster)) {
+        adds.push([line.from + m.at, line.from + m.at + m.len, Decoration.mark({ class: 'desk-mention' })]);
       }
       for (const m of line.text.matchAll(INLINE_URL)) {
         adds.push([line.from + m.index, line.from + m.index + m[0].length, Decoration.mark({ class: 'desk-url' })]);
@@ -295,11 +296,11 @@ export function createDeskEditor({
   };
 
   const previewField = StateField.define({
-    create: (state) => buildPreview(state, registry, null, host),
+    create: (state) => buildPreview(state, registry, null, host, mentions()),
     update(deco, tr) {
       const poked = tr.effects.some((e) => e.is(setFront) || e.is(metaArrived) || e.is(setFocused));
       if (!tr.docChanged && !tr.selection && !poked) return deco;
-      return buildPreview(tr.state, registry, tr.state.field(frontField), host);
+      return buildPreview(tr.state, registry, tr.state.field(frontField), host, mentions());
     },
     provide: (f) => EditorView.decorations.from(f),
   });

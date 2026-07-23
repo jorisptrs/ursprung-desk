@@ -147,10 +147,11 @@ function playerFor(src, { rig = false, demoSrc = null, kind = null, name = null 
   wrap.className = `back__play back__play--${as}`;
   wrap.dataset.plays = ''; // the tap that works a player is not the tap that lays the card down
 
+  // drawn rather than typed: ▶ and ▮▮ are different weights and sit on
+  // different baselines, so the bar twitched every time it was pressed
   const mark = document.createElement('span');
   mark.className = 'play__mark';
-  mark.dataset.mark = '';
-  mark.textContent = '▶';
+  mark.dataset.mark = 'play';
 
   const line = document.createElement('span');
   line.className = 'play__line';
@@ -316,16 +317,17 @@ export function renderCard(artifact, opts = {}) {
   front.className = 'card__front';
 
   if (artifact.kind === 'failure') {
-    // the stamp that says whose reject this is (D9 amended): a small diagonal
-    // "Claude" with "failure" beside it — about Claude's usefulness, never a
-    // judgment of the person's work
+    // the stamp that says what register this is (D9, amended again with the
+    // rename): a small diagonal "Claude" with "note" beside it. It is about
+    // working with Claude — a let-down or a surprise — and never a judgment of
+    // the person's work.
     const stamp = document.createElement('div');
     stamp.className = 'failure-stamp';
     const who = document.createElement('span');
     who.className = 'failure-stamp__who';
     who.textContent = 'Claude';
     const what = document.createElement('span');
-    what.textContent = 'failure';
+    what.textContent = 'note';
     stamp.append(who, what);
     front.append(stamp);
   }

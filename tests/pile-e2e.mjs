@@ -171,7 +171,7 @@ async function main() {
       const media = wrap?.querySelector('audio, video');
       if (!media) continue;
       return { id: el.dataset.id, tag: media.tagName, src: media.getAttribute('src'),
-               mark: wrap.querySelector('[data-mark]')?.textContent,
+               mark: wrap.querySelector('[data-mark]')?.dataset.mark,
                seek: !!wrap.querySelector('[data-seek]'),
                native: media.controls,
                links: [...el.querySelectorAll('.back__line')].map((a) => a.getAttribute('href')) };
@@ -179,7 +179,7 @@ async function main() {
     return null;
   })()`);
   ok(sound, `a recording is a player on the back (${sound?.tag ?? 'none found'})`);
-  ok(sound?.mark === '▶' && sound?.seek, 'with a mark to press and a line to travel');
+  ok(sound?.mark === 'play' && sound?.seek, 'with a mark to press and a line to travel');
   ok(!sound?.native, 'and none of the browser’s own chrome on the parchment');
   ok(!(sound?.links ?? []).some((h) => /\.(m4a|mp3|wav|mp4|mov|webm)$/i.test(h ?? '')),
     'and no line beside it that would fetch the same file instead');
