@@ -63,6 +63,20 @@ export function whoIs(root, token) {
 
 const UNKNOWN = 'this desk does not know that token — ask the keeper for your own';
 
+// Everyone the room knows, by name, in the order they were registered. This is
+// what an `@` offers: on a communal table the people are the room, and a name
+// typed from a list is a name spelled the way its owner spells it — which is
+// the only way `people` stays one person per name rather than three spellings
+// of E. Tokens are never in here; they are the way in, not a fact about anyone.
+export function roster(root = ROOT) {
+  const names = [];
+  for (const entry of Object.values(readPeople(root))) {
+    const name = typeof entry === 'string' ? entry : entry?.name;
+    if (typeof name === 'string' && name.trim() && !names.includes(name.trim())) names.push(name.trim());
+  }
+  return names;
+}
+
 // ---- what the desk answers to ----
 
 // A stable name and this machine's own addresses, nothing else. Host checking
@@ -143,6 +157,19 @@ export function createRoom({ root = ROOT, port = DEFAULT_PORT } = {}) {
     }
     next();
   };
+
+  // Who the sheet is holding, so a page can open already signed, and who else
+  // is in the building, so an @ can offer them. Names only, both times — the
+  // tokens are the way in and never leave the room machine.
+  app.get('/whoami', (req, res) => {
+    const who = whoIs(root, req.get('x-desk-token') ?? req.query.t);
+    if (!who) {
+      res.status(403).json({ refused: UNKNOWN });
+      return;
+    }
+    res.set('Cache-Control', 'no-store');
+    res.json({ name: who.name, people: roster(root) });
+  });
 
   app.post('/deposit', writeGuard, express.json({ limit: BODY_LIMIT }), (req, res) => {
     const who = whoIs(root, req.get('x-desk-token'));

@@ -249,6 +249,24 @@ test('the table is served, and nothing else in the repo is', { skip: !HAS_SDK &&
   }
 });
 
+test('the desk says who it is holding, and who else it knows — never a token', { skip: !HAS_SDK && 'mcp/npm install has not run' }, async () => {
+  const d = await open();
+  try {
+    const res = await fetch(`${d.base}/whoami`, { headers: { 'x-desk-token': TOKEN } });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.name, 'E.', 'so the page can open already signed');
+    assert.deepEqual(body.people, ['E.'], 'and an @ has the room to offer');
+    assert.equal(JSON.stringify(body).includes(TOKEN), false, 'the way in is never handed back out');
+
+    const stranger = await fetch(`${d.base}/whoami`, { headers: { 'x-desk-token': 'made-up' } });
+    assert.equal(stranger.status, 403);
+    assert.equal((await fetch(`${d.base}/whoami`)).status, 403, 'and no token is no answer');
+  } finally {
+    await d.close();
+  }
+});
+
 test('the log is served uncached, and is empty rather than missing before the first deposit', { skip: !HAS_SDK && 'mcp/npm install has not run' }, async () => {
   const d = await open();
   try {

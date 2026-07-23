@@ -259,7 +259,7 @@ export function buildPreview(state, registry, front, host) {
 export function createDeskEditor({
   parent, doc = '', registry, autofocus = false, teach = '',
   slashItems = [], onDocChanged = () => {}, onFrontTap = () => {},
-  linkMeta = new Map(), requestMeta = null,
+  linkMeta = new Map(), requestMeta = null, mentions = () => [],
 }) {
   const host = {
     linkMeta,
@@ -324,6 +324,29 @@ export function createDeskEditor({
           item.run(v, applyFrom - 1);
         },
       })),
+    };
+  }
+
+  // The room, offered at the @ (keeper's ruling). On a communal table the
+  // people are the room, and a name picked from the list is spelled the way its
+  // owner spells it — which is what keeps `people` one person per name instead
+  // of three spellings of the same one. It offers, it never restricts: an @
+  // followed by anything at all is still a name, because someone in a studio
+  // may not be in the registry at all.
+  function mentionSource(context) {
+    const names = mentions();
+    if (!names.length) return null;
+    const line = context.state.doc.lineAt(context.pos);
+    const before = line.text.slice(0, context.pos - line.from);
+    const at = /(^|\s)@([\p{L}\d._'-]*)$/u.exec(before);
+    if (!at) return null;
+    const typed = at[2].toLowerCase();
+    const offered = names.filter((n) => n.toLowerCase().startsWith(typed));
+    if (!offered.length) return null;
+    return {
+      from: line.from + at.index + at[1].length + 1, // just past the @
+      validFor: /^[\p{L}\d._'-]*$/u,
+      options: offered.map((name) => ({ label: name, type: 'text' })),
     };
   }
 
@@ -429,7 +452,7 @@ export function createDeskEditor({
         history(),
         // the completion keymap must outrank the editing keymaps, or Enter
         // inserts a newline under an open menu instead of picking
-        autocompletion({ override: [slashSource], icons: false, interactionDelay: 0 }),
+        autocompletion({ override: [slashSource, mentionSource], icons: false, interactionDelay: 0 }),
         keymap.of([...deskKeymap, ...historyKeymap, ...defaultKeymap]),
         placeholder(teach),
         theme,
@@ -458,10 +481,14 @@ export function createDeskEditor({
   return {
     view,
     getText: () => view.state.doc.toString(),
-    setText(text, { focusEnd = false } = {}) {
+    // caretAt puts the pen somewhere named — a page that opens already signed
+    // wants it at the top, above the signature, not wherever the old selection
+    // happens to map to.
+    setText(text, { focusEnd = false, caretAt = null } = {}) {
+      const anchor = focusEnd ? text.length : caretAt;
       view.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: text },
-        selection: focusEnd ? { anchor: text.length } : undefined,
+        selection: anchor == null ? undefined : { anchor: Math.max(0, Math.min(anchor, text.length)) },
       });
     },
     applyChange(change) { // { from, to, insert, cursor? } in current-doc coordinates

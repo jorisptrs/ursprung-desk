@@ -18,6 +18,9 @@ import { createTray, createBrowserBackend } from './tray.js';
 
 // ---- pure helpers (node-tested; no DOM) ----
 
+// One meaning of filled across the whole desk (D128): whitespace is not a word.
+const isFilled = (v) => typeof v === 'string' && v.trim().length > 0;
+
 export const FORM_FOR = {
   image: 'crop', audio: 'waveform', video: 'frames', text: 'sentence',
   code: 'lines', fold: 'linework', model: 'render', note: 'words',
@@ -292,6 +295,20 @@ export function deckSpread(n) {
 // written counts — the title door leaves the slash menu; deleting the line
 // brings it back.
 export const hasTitleLine = (docText) => String(docText ?? '').split('\n').some((l) => l.startsWith('# '));
+
+// A page opens already signed (keeper's ruling): the depositor's name sits at
+// the foot like a signature and the pen waits above it, so a card is theirs
+// unless they say otherwise. Being someone else's work is then a deliberate
+// edit — delete the name, or add others beside it — rather than a silence
+// nobody notices. Where the desk cannot say who is holding the sheet (the
+// published renderer has no room to ask) the page opens blank, as it always did.
+export const signedPage = (me) => (isFilled(me) ? `\n\n@${String(me).trim()}` : '');
+
+// The signature alone is not a card. Everything else about "has anything been
+// brought yet" stays where it was — this only stops an untouched page from
+// being pushable merely because it knows whose page it is.
+export const onlySignature = (docText, me) =>
+  isFilled(me) && String(docText ?? '').trim() === `@${String(me).trim()}`;
 
 // The title is md (D90): the first `# something` line anywhere in the text is
 // the title and leaves the body; `#x`, `## x`, later `#` lines, and a bare
@@ -732,12 +749,15 @@ const mintId = () => (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`)
 let editorModule = null;
 export const warmEditor = () => { editorModule ??= import('./editor.js'); return editorModule; };
 
-export function openSheet({ mode = 'overlay', container = document.body, sink, prefill = null, tray = null, autofocus = true } = {}) {
+export function openSheet({
+  mode = 'overlay', container = document.body, sink, prefill = null, tray = null, autofocus = true,
+  me = null, people = [],
+} = {}) {
   tray = tray ?? createTray(createBrowserBackend());
 
   const state = {
     kind: 'work',
-    docText: '',
+    docText: signedPage(me),
     registry: new Map(), // id → { kind, name, blob, front } — append-only for the sheet's life (D96)
     linkMeta: new Map(), // href → { status, image, title } — the page asked once, itself (D98)
     frontPieceId: null,
@@ -997,6 +1017,7 @@ export function openSheet({ mode = 'overlay', container = document.body, sink, p
       requestMeta,
       autofocus,
       teach: 'write · / for anything · @ for people', // short: the hint sits on the line the pen starts on (D99)
+      mentions: () => people, // the room, offered at the @
       slashItems,
       onDocChanged: (text) => { state.docText = text; refreshPreviews(); },
       onFrontTap: (key) => {
@@ -1010,7 +1031,8 @@ export function openSheet({ mode = 'overlay', container = document.body, sink, p
 
   // -- the push, the deck, and what never gets lost (D99) --
 
-  const hasAnything = () => current().artifact.media != null;
+  // A page holding nothing but the name it opened with is not a card yet.
+  const hasAnything = () => current().artifact.media != null && !onlySignature(state.docText, me);
 
   function serializedSheet(blobKeys) {
     const { blocks } = parseDoc(state.docText, state.registry);
@@ -1037,7 +1059,9 @@ export function openSheet({ mode = 'overlay', container = document.body, sink, p
 
   function clearForm() {
     state.kind = 'work';
-    state.docText = '';
+    // the next page opens signed too — a fresh card is yours by default, every
+    // time, not only the first
+    state.docText = signedPage(me);
     // emptied in place, never replaced (D99): the editor holds these two maps
     // by reference — a new Map here leaves it looking at the old one, and every
     // piece added afterwards renders as raw text with no preview ever arriving
@@ -1046,7 +1070,7 @@ export function openSheet({ mode = 'overlay', container = document.body, sink, p
     state.frontPieceId = null;
     state.editingId = null;
     practice.value = '';
-    if (ed) ed.setText('');
+    if (ed) ed.setText(state.docText, { caretAt: 0 }); // the pen waits above the signature
     syncMeta();
     refreshPreviews();
   }

@@ -35,7 +35,11 @@ export function describe({ author = null, remote = false } = {}) {
       : 'excerpt: for image/audio/video/fold/model, the path to the file itself — a recording or a take is cut here into its trace. For text/code/note, one short sentence, or nothing.',
     'A card carries a title, a caption, or a line — any one is enough.',
     author
-      ? `This desk knows you as ${author}. Put other makers in people where a work was made with someone; leave it out and the card is yours.`
+      // The rule the code actually keeps: people is who MADE the work, and it
+      // replaces the default rather than adding to it. Said plainly, because
+      // the obvious wording ("put other makers in people") loses the person
+      // their own card.
+      ? `This desk knows you as ${author}. Leave people out and the card is yours. If you fill it in, it must name everyone who made the work — including ${author} where they did.`
       : 'Every card names its author — put whoever made the work in people. Required: the desk signs for nobody. If you do not know, ask.',
     '',
     'The desk sets id, night, provenance and visibility. Refusals come back in plain words.',
