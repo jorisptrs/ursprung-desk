@@ -348,7 +348,10 @@ if (isMainModule(import.meta.url)) {
   const people = readPeople(root);
   const claimed = people.filter((p) => p.tokens.length).length;
   say(`the desk is open on ${port}`);
-  say(`  the table   http://desk.local:${port}/?rig&live`);
+  // two views of one table: the shoot's, which deals itself and holds the meta
+  // card back, and the room's, which starts held under the driver's own keys
+  say(`  the take    http://desk.local:${port}/?live&tail=1`);
+  say(`  the room    http://desk.local:${port}/?rig&live`);
   say(`  the one QR  http://desk.local:${port}/deposit.html`);
   say(people.length
     ? `  ${people.length} in the cohort, ${claimed} claimed`
