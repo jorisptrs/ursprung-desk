@@ -555,6 +555,47 @@ export function broadcastSink() {
   };
 }
 
+// The room server's door (BRIEF §7 step 5): the same `deposit(artifact, blobs)`
+// face as every other sink, pointed across the room's own network instead of
+// at a tab in this browser. The token is the person — registered once, carried
+// here by their printed QR — so the card arrives already knowing who made it.
+// Blobs travel as a File's three parts, because on the far side there is no
+// browser to hold one.
+export function httpSink(base, token, { fetch: fetchImpl = null } = {}) {
+  const get = fetchImpl ?? ((u, o) => fetch(u, o));
+  return {
+    // the room's table is the projected one, so a push says what actually
+    // happened rather than the same-browser line the broadcast door says
+    says: 'pushed · the table has it',
+    async deposit(artifact, blobs = {}) {
+      // Refused here first, in the stream's own words, so a card that cannot
+      // stand never becomes an upload.
+      const probe = validateArtifact(materialize(artifact, blobs, () => 'blob:probe'));
+      if (probe) throw new Error(probe);
+
+      const packed = {};
+      for (const [key, blob] of Object.entries(blobs)) {
+        if (!blob) continue;
+        const url = await readDataUrl(blob);
+        packed[key] = { name: blob.name ?? '', type: blob.type ?? '', b64: url.slice(url.indexOf(',') + 1) };
+      }
+      let res;
+      try {
+        res = await get(`${base}/deposit`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-desk-token': token },
+          body: JSON.stringify({ artifact, blobs: packed }),
+        });
+      } catch {
+        throw new Error('the desk is not answering — the room may be off the network');
+      }
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.refused ?? `the desk did not take it (${res.status})`);
+      return body.laid;
+    },
+  };
+}
+
 export function attachBroadcastReceiver(stream) {
   if (typeof BroadcastChannel === 'undefined') return;
   const channel = new BroadcastChannel(CHANNEL);
@@ -1156,7 +1197,7 @@ export function openSheet({ mode = 'overlay', container = document.body, sink, p
       clearForm();
       await refreshDeck();
       if (mode === 'overlay') close(); // the table is right behind — watch it arrive
-      else say('pushed · a table open in this browser took it');
+      else say(sink.says ?? 'pushed · a table open in this browser took it');
     } catch (err) {
       const m = String(err?.message ?? err);
       if (m.includes('no table')) { // silence is not refusal — the deck keeps it (D99)
@@ -1187,7 +1228,7 @@ export function openSheet({ mode = 'overlay', container = document.body, sink, p
     } else if (mode === 'overlay') {
       close(); // the table is right behind — watch them arrive
     } else {
-      say(`${laid.length} pushed · a table open in this browser took them`);
+      say(sink.says ? `${laid.length} ${sink.says}` : `${laid.length} pushed · a table open in this browser took them`);
     }
   });
 
