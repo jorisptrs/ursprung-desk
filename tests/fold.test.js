@@ -240,3 +240,29 @@ test('a castle-scale table: the map holds where the scatter collapsed', () => {
     assert.ok(st.place[0] > 0.02 && st.place[0] < 0.98 && st.place[1] > 0.02 && st.place[1] < 0.98, `${st.name} is on the table`);
   }
 });
+
+test('a studio’s place is the middle of its stack, whatever it holds', () => {
+  // the thread from a shared work lands on this point, and the next card
+  // arrives at it — so the cascade opens around it rather than trailing off
+  for (const n of [1, 2, 3, 4, 9]) {
+    const evs = [
+      ...Array.from({ length: n }, (_, i) => person(`a-${i}`, ['E.'])),
+      { e: 'arrange', night: 1, places: { 'E.': [0.5, 0.5] } },
+    ];
+    const s = fold(evs, pastEnd(evs));
+    const shown = s.cards.filter((c) => !c.buried);
+    const cx = shown.reduce((a, c) => a + c.x, 0) / shown.length;
+    const cy = shown.reduce((a, c) => a + c.y, 0) / shown.length;
+    assert.ok(Math.abs(cx - 0.5) < 1e-9 && Math.abs(cy - 0.5) < 1e-9, `${n} cards sit off their studio`);
+  }
+});
+
+test('someone with nothing of their own still stands somewhere a thread can reach', () => {
+  const evs = [person('a-1', ['E.']), person('a-2', ['E.', 'T.'])];
+  const s = fold(evs, pastEnd(evs));
+  const t = s.studios.find((x) => x.name === 'T.');
+  assert.equal(t.held, 0, 'T. deposited nothing alone');
+  assert.ok(t.place.every((v) => v > 0.02 && v < 0.98), 'and still has a place on the table');
+  const anchor = s.threads.find((x) => x.anchor && String(x.toPlace) === String(t.place));
+  assert.ok(anchor, 'the shared work hangs from it — the view draws the name there, so no thread ends in air');
+});

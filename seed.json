@@ -48,7 +48,7 @@
     "artifact": {
       "id": "a-007", "media": "audio", "kind": "work",
       "title": "kettle drone, take 4",
-      "caption": "audio · B. + Claude",
+      "caption": "audio · four minutes",
       "people": ["B.", "Claude"], "provenance": "hand", "visibility": "public",
       "excerpt": { "form": "waveform", "src": "assets/waveform-kettle.svg" },
       "detail": { "experience": { "mode": "play", "src": "assets/Test.m4a" } }
@@ -57,7 +57,7 @@
     "artifact": {
       "id": "a-008", "media": "code", "kind": "work",
       "title": "the 1993 system",
-      "caption": "running · M. + Claude",
+      "caption": "running · slowly",
       "people": ["M.", "Claude"], "provenance": "mcp", "visibility": "public",
       "excerpt": { "form": "lines", "text": "while (alive) {\n  listen();\n  adapt();\n}" }
     } },
@@ -83,7 +83,7 @@
     "artifact": {
       "id": "a-011", "media": "text", "kind": "work",
       "title": "chapter 7, rewritten",
-      "caption": "manuscript · E. + Claude",
+      "caption": "manuscript · third pass",
       "people": ["E.", "Claude"], "provenance": "mcp", "visibility": "public",
       "excerpt": { "form": "sentence", "text": "The river had been rehearsing this bend for a thousand years." }
     } },
@@ -134,7 +134,7 @@
     "artifact": {
       "id": "a-017", "media": "note", "kind": "meta",
       "title": "the desk, v0",
-      "caption": "J. + Claude · Berlin, July",
+      "caption": "Berlin, July",
       "people": ["J.", "Claude"], "provenance": "curator", "visibility": "public",
       "excerpt": { "form": "words", "text": "the desk, v0" },
       "detail": { "note": "a seeded demonstration — the people are invented, the works are stand-ins · the real table opens in October" }

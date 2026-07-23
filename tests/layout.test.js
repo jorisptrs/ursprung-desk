@@ -4,7 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { arrange, ring } from '../js/layout.js';
+import { arrange, ring, packSpread } from '../js/layout.js';
 import { TABLE_ASPECT } from '../js/fold.js';
 
 const NAMES = ['R.', 'B.', 'M.', 'E.', 'Y.', 'T.', 'L.', 'A.', 'S.', 'K.', 'N.', 'P.',
@@ -78,4 +78,66 @@ test('the first ring is a room, not a queue', () => {
   assert.ok(onTable(r));
   const xs = new Set(Object.values(r).map(([x]) => x.toFixed(3)));
   assert.ok(xs.size > NAMES.length / 2, 'they do not share one column');
+});
+
+// ---- a pile opened under a hand (D144) ----
+
+const boxes = (n, w = 100, h = 90) => Array.from({ length: n }, () => ({ w, h }));
+const rects = (sizes, pack) => pack.offsets.map((o, i) => ({
+  x1: o.dx - sizes[i].w / 2, x2: o.dx + sizes[i].w / 2,
+  y1: o.dy - sizes[i].h / 2, y2: o.dy + sizes[i].h / 2,
+}));
+const overlaps = (rs) => {
+  for (let i = 0; i < rs.length; i++) {
+    for (let j = i + 1; j < rs.length; j++) {
+      const a = rs[i]; const b = rs[j];
+      if (a.x1 < b.x2 - 1e-9 && a.x2 > b.x1 + 1e-9 && a.y1 < b.y2 - 1e-9 && a.y2 > b.y1 + 1e-9) return true;
+    }
+  }
+  return false;
+};
+
+test('an open pile shows every card whole, and no card covers another', () => {
+  for (const n of [1, 2, 3, 4, 5, 6, 9, 12]) {
+    const sizes = boxes(n);
+    const pack = packSpread(sizes, 8);
+    assert.equal(pack.offsets.length, n, `${n} cards, ${n} places`);
+    assert.ok(!overlaps(rects(sizes, pack)), `${n} cards overlap`);
+  }
+});
+
+test('it takes only the room it needs — a pile of one grows nothing', () => {
+  const one = packSpread(boxes(1), 8);
+  assert.deepEqual(one.offsets, [{ dx: 0, dy: 0 }]);
+  assert.deepEqual([one.w, one.h], [100, 90], 'a card alone is its own block');
+  const two = packSpread(boxes(2), 8);
+  assert.equal(two.w, 208, 'two cards wide, plus the margin — not a fixed square');
+  assert.equal(two.h, 90, 'and one card tall');
+  assert.ok(packSpread(boxes(9), 8).w < packSpread(boxes(12), 8).w * 1.01);
+});
+
+test('the block is centred, so it opens around the studio it belongs to', () => {
+  for (const n of [2, 3, 5, 7]) {
+    const sizes = boxes(n);
+    const rs = rects(sizes, packSpread(sizes, 8));
+    const left = Math.min(...rs.map((r) => r.x1));
+    const right = Math.max(...rs.map((r) => r.x2));
+    const top = Math.min(...rs.map((r) => r.y1));
+    const bottom = Math.max(...rs.map((r) => r.y2));
+    assert.ok(Math.abs(left + right) < 1e-9, `${n} cards sit off-centre horizontally`);
+    assert.ok(Math.abs(top + bottom) < 1e-9, `${n} cards sit off-centre vertically`);
+  }
+});
+
+test('a studio holds more than one shape: rows are as tall as their tallest card', () => {
+  const sizes = [{ w: 100, h: 200 }, { w: 100, h: 60 }, { w: 100, h: 90 }, { w: 100, h: 90 }];
+  const pack = packSpread(sizes, 8);
+  assert.ok(!overlaps(rects(sizes, pack)), 'a tall photograph does not sit on the note beside it');
+  assert.equal(pack.h, 200 + 8 + 90, 'the block is the sum of its rows, not of its cards');
+});
+
+test('nothing to open', () => {
+  assert.deepEqual(packSpread([]), { offsets: [], w: 0, h: 0 });
+  assert.deepEqual(packSpread(null), { offsets: [], w: 0, h: 0 });
+  assert.deepEqual(packSpread([{ w: 0, h: 0 }]), { offsets: [], w: 0, h: 0 }, 'a card with no size is not a card');
 });

@@ -555,9 +555,9 @@ try {
   ok(await evalIn(table, `${HELPERS} until(() => {
     const el = document.querySelector('#field [data-id="h-004"]');
     return !!el && el.classList.contains('card--audio') && el.classList.contains('kind--failure')
-      && el.querySelector('.back__door')?.dataset.door === 'play'
+      && el.querySelector('audio[data-plays]')?.controls === true
       && el.querySelector('.card__trace img')?.src.startsWith('data:image/svg');
-  }, 8000)`, true), 'the flagged card crosses the channel — ashen, waveform front, play door behind');
+  }, 8000)`, true), 'the flagged card crosses the channel — ashen, waveform front, a player behind (D147)');
   await sleep(600);
   const shot2 = await table.send('Page.captureScreenshot', { format: 'png' });
   writeFileSync('/tmp/desk-shots/e2e-table-after.png', Buffer.from(shot2.data, 'base64'));

@@ -16,7 +16,7 @@ export const specimenEvents = [
 
   { e: 'deposit', night: 2, artifact: {
     id: 's-002', media: 'audio', kind: 'work', title: 'kettle drone, take 4',
-    caption: 'audio · B. + Claude', people: ['B.', 'Claude'], provenance: 'curator', visibility: 'public',
+    caption: 'audio · four minutes', people: ['B.', 'Claude'], provenance: 'curator', visibility: 'public',
     excerpt: { form: 'waveform', src: 'assets/placeholder-waveform.svg' },
     detail: { experience: { mode: 'play', src: 'assets/Test.m4a' } } } },
 
@@ -27,7 +27,7 @@ export const specimenEvents = [
 
   { e: 'deposit', night: 2, artifact: {
     id: 's-006', media: 'code', kind: 'work', title: 'the 1993 system',
-    caption: 'running · M. + Claude', people: ['M.', 'Claude'], provenance: 'mcp', visibility: 'public',
+    caption: 'running · slowly', people: ['M.', 'Claude'], provenance: 'mcp', visibility: 'public',
     excerpt: { form: 'lines', text: 'while (alive) {\n  listen();\n  adapt();\n}' } } },
 
   { e: 'deposit', night: 2, artifact: {
@@ -45,7 +45,7 @@ export const specimenEvents = [
 
   { e: 'deposit', night: 3, artifact: {
     id: 's-004', media: 'text', kind: 'work', title: 'chapter 7, rewritten',
-    caption: 'manuscript · E. + Claude', people: ['E.', 'Claude'], provenance: 'curator', visibility: 'public',
+    caption: 'manuscript · third pass', people: ['E.', 'Claude'], provenance: 'curator', visibility: 'public',
     excerpt: { form: 'sentence', text: 'The river had been rehearsing this bend for a thousand years.' } } },
 
   { e: 'deposit', night: 3, artifact: {
@@ -55,7 +55,7 @@ export const specimenEvents = [
 
   { e: 'deposit', night: 3, artifact: {
     id: 's-009', media: 'model', kind: 'work', title: 'the zither, drawn',
-    caption: 'wireframe · Y. + Claude', people: ['Y.', 'Claude'], provenance: 'mcp', visibility: 'public',
+    caption: 'wireframe · one screen', people: ['Y.', 'Claude'], provenance: 'mcp', visibility: 'public',
     excerpt: { form: 'render', src: 'assets/placeholder-render.svg' },
     detail: { experience: { mode: 'visit', src: 'https://example.org/zither' } } } },
 
@@ -71,7 +71,7 @@ export const specimenEvents = [
 
   { e: 'deposit', night: 4, artifact: {
     id: 's-013', media: 'note', kind: 'meta', title: 'the desk, v0',
-    caption: 'J. + Claude · Berlin, July', people: ['J.', 'Claude'], provenance: 'curator', visibility: 'public',
+    caption: 'Berlin, July', people: ['J.', 'Claude'], provenance: 'curator', visibility: 'public',
     excerpt: { form: 'words', text: 'the desk, v0' } } },
 
   // a cross-night thread: opacity must sink with its dimmer end (D14)

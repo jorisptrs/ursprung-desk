@@ -7,7 +7,7 @@
 // table.
 
 import { renderCard, backModel } from './cards.js';
-import { deckSpread } from './deposit.js';
+import { packSpread } from './layout.js';
 import { CARD_W, NOMINAL_H } from './fold.js';
 import { sleep } from './queue.js';
 import { isPlace } from './stream.js';
@@ -37,7 +37,6 @@ export function createView(field, { rig = false } = {}) {
   let lastState = { cards: [], threads: [] };
   let rect = { w: field.clientWidth, h: field.clientHeight };
   let flippedId = null; // one card in hand at a time (D73); view-ephemera, never logged (D23)
-  let playing = null; // the one summoned experience: { cardId, el, doorEl } (D75)
   let openPage = 0; // which leaf of the open card's back is showing (D100)
   let openLeaves = [0]; // where each leaf begins, in the open back's own pixels
   let openPile = null; // which studio's pile is spread open — view-ephemera too
@@ -46,6 +45,14 @@ export function createView(field, { rig = false } = {}) {
   const layer = document.createElement('div');
   layer.className = 'threads';
   field.append(layer);
+  // Where each studio stands, named. It lies under its own pile and is only
+  // read where a studio holds no cards of its own — someone whose whole week is
+  // collaborations — which is exactly where a thread would otherwise end in
+  // empty air. It is also where the next card will arrive.
+  const marks = document.createElement('div');
+  marks.className = 'studios';
+  field.append(marks);
+  const markEls = new Map(); // person → element
 
   const short = () => Math.min(rect.w, rect.h);
 
@@ -64,45 +71,50 @@ export function createView(field, { rig = false } = {}) {
     openPile ? lastState.cards.filter((c) => pileKey(c) === openPile) : [];
 
   // Where a card of the open pile lies, in px from where it lies stacked. The
-  // whole spread is nudged back inside the light, so a studio at the edge opens
-  // inward rather than off the table.
+  // pile opens to exactly the room its own cards need — a pile of two goes two
+  // wide, a pile of one grows nothing — and the block is nudged back inside the
+  // light, so a studio at the edge opens inward rather than off the table.
+  let spreadCache = null;
+  function spreadPlan() {
+    const key = `${openPile}·${Math.round(rect.w)}×${Math.round(rect.h)}`;
+    if (spreadCache?.key === key) return spreadCache.plan;
+    const group = inOpenPile();
+    let plan = null;
+    if (group.length > 1) {
+      const gap = Math.max(6, short() * 0.012); // the thin margin between cards
+      const sizes = group.map((c) => {
+        const el = cardEls.get(c.id);
+        const { w, h } = cardSizePx(c);
+        return { w: el?.offsetWidth || w, h: el?.offsetHeight || h };
+      });
+      const pack = packSpread(sizes, gap);
+      // the studio's own place is the middle of its stack (fold.js), so the
+      // spread opens around the same point the pile stood on
+      const [cx, cy] = [group[0].x * rect.w, group[0].y * rect.h];
+      const m = Math.max(8, short() * 0.015);
+      const fit = (c, size, max) =>
+        size + m * 2 >= max ? max / 2 : Math.min(Math.max(c, size / 2 + m), max - size / 2 - m);
+      const ox = fit(cx, pack.w, rect.w) - cx;
+      const oy = fit(cy, pack.h, rect.h) - cy;
+      plan = new Map(group.map((c, i) => [c.id, {
+        dx: ox + pack.offsets[i].dx + cx - c.x * rect.w,
+        dy: oy + pack.offsets[i].dy + cy - c.y * rect.h,
+      }]));
+    }
+    spreadCache = { key, plan };
+    return plan;
+  }
+
   function spreadOf(card) {
     if (!openPile || pileKey(card) !== openPile) return null;
-    const group = inOpenPile();
-    const i = group.findIndex((c) => c.id === card.id);
-    if (i < 0) return null;
-    const offsets = deckSpread(group.length);
-    const top = group[group.length - 1];
-    const { w, h } = cardSizePx(top);
-    const el = cardEls.get(top.id);
-    const pitch = { x: (el?.offsetWidth || w) * 1.1, y: (el?.offsetHeight || h) * 1.1 };
-    const cx = card.x * rect.w;
-    const cy = card.y * rect.h;
-    // the pile's own place, not this card's step in the cascade
-    const base = group[0];
-    const ox = base.x * rect.w + offsets[i][0] * pitch.x;
-    const oy = base.y * rect.h + offsets[i][1] * pitch.y;
-    const m = Math.max(8, short() * 0.015);
-    const span = offsets.reduce((s, [x, y]) => ({
-      x1: Math.min(s.x1, x), x2: Math.max(s.x2, x), y1: Math.min(s.y1, y), y2: Math.max(s.y2, y),
-    }), { x1: 0, x2: 0, y1: 0, y2: 0 });
-    const shift = (c, lo, hi, half, max) => {
-      const left = c + lo - half - m;
-      const right = c + hi + half + m;
-      if (right > max) return Math.min(0, max - right);
-      if (left < 0) return Math.max(0, -left);
-      return 0;
-    };
-    return {
-      dx: ox - cx + shift(base.x * rect.w, span.x1 * pitch.x, span.x2 * pitch.x, pitch.x / 2, rect.w),
-      dy: oy - cy + shift(base.y * rect.h, span.y1 * pitch.y, span.y2 * pitch.y, pitch.y / 2, rect.h),
-    };
+    return spreadPlan()?.get(card.id) ?? null;
   }
 
   // The one motion the table allows itself besides the flip, and only under a
   // hand: while this flag stands, a card's move is a move (desk.css). Arrivals
   // never carry it, so a card still appears where it will lie forever (D87).
   function markMotion() {
+    spreadCache = null; // measured from the laid cards; they are about to change
     field.dataset.opening = '';
     clearTimeout(motionTimer);
     motionTimer = setTimeout(() => { delete field.dataset.opening; }, 320);
@@ -130,6 +142,7 @@ export function createView(field, { rig = false } = {}) {
     el.style.width = `max(${(CARD_W * 100 * card.scale).toFixed(2)}cqmin, ${Math.round(FLOOR_W * card.scale)}px)`;
     el.style.fontSize = `max(${(CARD_W * 100 * card.scale * 0.075).toFixed(3)}cqmin, ${(FLOOR_W * 0.075 * card.scale).toFixed(1)}px)`;
     const pivot = el.querySelector('.card__pivot');
+    el.toggleAttribute('data-lit', card.id === flippedId || pileKey(card) === openPile);
     if (card.id === flippedId) { // in hand: grown, straightened, lifted, fully lit
       // height first, so the in-hand pose is computed on the true size
       layoutOpenBack(el);
@@ -355,7 +368,7 @@ export function createView(field, { rig = false } = {}) {
     state.cards.forEach((card, i) => {
       let el = cardEls.get(card.id);
       if (!el) {
-        el = renderCard(card.artifact);
+        el = renderCard(card.artifact, { rig });
         el.dataset.id = card.id;
         cardEls.set(card.id, el);
         field.append(el);
@@ -370,6 +383,27 @@ export function createView(field, { rig = false } = {}) {
         cardEls.delete(id);
       }
     }
+    const seenStudios = new Set();
+    for (const studio of state.studios ?? []) {
+      let el = markEls.get(studio.name);
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'studio';
+        el.textContent = `@${studio.name}`;
+        markEls.set(studio.name, el);
+        marks.append(el);
+      }
+      el.style.left = `${(studio.place[0] * 100).toFixed(2)}%`;
+      el.style.top = `${(studio.place[1] * 100).toFixed(2)}%`;
+      el.dataset.held = String(studio.held);
+      seenStudios.add(studio.name);
+    }
+    for (const [name, el] of markEls) {
+      if (seenStudios.has(name)) continue;
+      el.remove();
+      markEls.delete(name);
+    }
+
     const seenThreads = new Set();
     for (const thread of state.threads) {
       const key = threadKey(thread);
@@ -389,6 +423,10 @@ export function createView(field, { rig = false } = {}) {
         threadEls.delete(key);
       }
     }
+    // While something is being read, the rest of the table steps back a little.
+    // Brightness, never opacity — opacity is how the table says age (D14), and
+    // two meanings on one channel is how a legend gets invented.
+    field.toggleAttribute('data-reading', flippedId != null || openPile != null);
     lastState = state;
   }
 
@@ -477,7 +515,7 @@ export function createView(field, { rig = false } = {}) {
       if (!open && flippedId === id) flippedId = null;
       return;
     }
-    if (!open && playing?.cardId === id) stopExperience(); // flip-back is stillness
+    if (!open) stopExperience(id); // a card laid down goes quiet
     const pivot = el.querySelector('.card__pivot');
     const wasOpen = flippedId === id;
     const fromPose = wasOpen ? flippedTransform(card, el) : laidKeyframe(card);
@@ -543,47 +581,21 @@ export function createView(field, { rig = false } = {}) {
 
   // ---- the summoned experience (D72/D75): once, in place, stillness after ----
 
-  function stopExperience() {
-    if (!playing) return;
-    playing.el.pause?.();
-    playing.el.remove?.();
-    if (playing.doorEl) playing.doorEl.textContent = 'play';
-    playing = null;
+  // A card laid down goes quiet (D75's promise, kept against the new mechanism):
+  // the players live on the back now, so stillness means pausing what is there.
+  function stopExperience(id) {
+    if (id == null) return;
+    for (const el of cardEls.get(id)?.querySelectorAll('[data-plays]') ?? []) el.pause?.();
   }
 
-  function tapDoor(id, doorEl) {
+  // The only door left is 'visit': the work runs elsewhere and the table stays
+  // still. A recording no longer needs a door — it plays on the back (D147).
+  function tapDoor(id) {
     const card = lastState.cards.find((c) => c.id === id);
     const model = card ? backModel(card.artifact) : null;
-    if (!model?.door) return;
-    if (model.door.mode === 'visit') { // the work runs elsewhere; the table stays still
-      if (!isPlace(model.door.src)) return; // never a script, however it got here (D127)
-      window.open(model.door.src, '_blank', 'noopener');
-      return;
-    }
-    if (playing?.cardId === id) { // tap again: stillness
-      stopExperience();
-      return;
-    }
-    stopExperience(); // one at a time, always
-    const src = !rig && model.door.demoSrc ? model.door.demoSrc : model.door.src;
-    if (card.artifact.media === 'video') {
-      const video = document.createElement('video');
-      video.className = 'back__player';
-      video.src = src;
-      video.playsInline = true;
-      video.autoplay = true;
-      video.onended = stopExperience;
-      video.onerror = stopExperience;
-      cardEls.get(id)?.querySelector('.card__back')?.append(video);
-      playing = { cardId: id, el: video, doorEl };
-    } else {
-      const audio = new Audio(src);
-      audio.onended = stopExperience;
-      audio.onerror = stopExperience;
-      audio.play().catch(() => stopExperience());
-      playing = { cardId: id, el: audio, doorEl };
-    }
-    if (doorEl) doorEl.textContent = 'still'; // the door word is its own stop
+    if (model?.door?.mode !== 'visit') return;
+    if (!isPlace(model.door.src)) return; // never a script, however it got here (D127)
+    window.open(model.door.src, '_blank', 'noopener');
   }
 
   // Cache-warm a trace image without touching the DOM — decoding after the
@@ -636,7 +648,9 @@ export function createView(field, { rig = false } = {}) {
     if (next === openPile) return false;
     openPile = next;
     if (flippedId != null) { // one thing in hand at a time: the card goes back down
-      if (playing?.cardId === flippedId) stopExperience();
+      stopExperience(flippedId);
+      const was = cardEls.get(flippedId);
+      if (was) closeBack(was); // give the grown height back before the pack measures
       flippedId = null;
     }
     markMotion();
@@ -656,6 +670,7 @@ export function createView(field, { rig = false } = {}) {
 
   function onResize() {
     rect = { w: field.clientWidth, h: field.clientHeight };
+    spreadCache = null;
     relayThreads(); // cards are %/cqmin and re-flow by CSS
   }
 

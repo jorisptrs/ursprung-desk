@@ -86,6 +86,10 @@ const FLOAT_SCALE = 0.4; // a mark between two studios, read by opening it
 const PILE_SHOWS = 4; // past the fourth, a pile is just a pile — never a tally of output
 const PILE_STEP_X = 0.006; // the cascade of one pile, in canonical units
 const PILE_STEP_Y = 0.008;
+// A pile cascades around its studio's place rather than away from it, so the
+// place is the middle of the stack: it is where the studio's mark stands, where
+// the threads land, and where the next card arrives.
+const cascade = (d, held) => Math.min(d, PILE_SHOWS - 1) - (Math.min(held, PILE_SHOWS) - 1) / 2;
 
 // A shared work is settled off the studios rather than dropped on the midpoint
 // between its makers — that midpoint is very often exactly where somebody else
@@ -202,6 +206,11 @@ export function fold(events, t) {
       : fallbackPlace(name, i, studios.length));
   });
 
+  // How deep each pile ends up, counted before anything is placed, so the
+  // cascade can be centred on the studio rather than trailing off it.
+  const held = new Map();
+  for (const c of live) if (c.pile) held.set(c.pile, (held.get(c.pile) ?? 0) + 1);
+
   // Each pile cascades up-right, newest on top; past the fourth the cards stop
   // stepping, so depth is a placement rule and a pile never reads as a score.
   // Everything the same hands made together is one floating pile, for the same
@@ -219,7 +228,7 @@ export function fold(events, t) {
       const d = depth.get(c.pile) ?? 0;
       depth.set(c.pile, d + 1);
       c.depth = d;
-      const shown = Math.min(d, PILE_SHOWS - 1);
+      const shown = cascade(d, held.get(c.pile) ?? 1);
       const [px, py] = at.get(c.pile);
       c.x = clamp(px + shown * PILE_STEP_X, 0.05, 0.95);
       c.y = clamp(py - shown * PILE_STEP_Y, 0.05, 0.95);
@@ -251,7 +260,7 @@ export function fold(events, t) {
   for (const n of nodes) {
     n.group.forEach((c, d) => {
       c.depth = d;
-      const shown = Math.min(d, PILE_SHOWS - 1);
+      const shown = cascade(d, n.group.length);
       c.x = clamp(n.cx / TABLE_ASPECT + shown * PILE_STEP_X, 0.05, 0.95);
       c.y = clamp(n.cy - shown * PILE_STEP_Y, 0.05, 0.95);
       c.buried = d >= PILE_SHOWS;

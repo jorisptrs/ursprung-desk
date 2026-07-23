@@ -98,15 +98,52 @@ export function backModel(artifact) {
   const note = typeof d.note === 'string' && d.note.length > 0 ? d.note : null;
   if (!door && !composition.length && !files.length && !links.length && !note) return null;
   // a note card's words are already its face — the back doesn't repeat them (D40)
-  return { title: artifact.media === 'note' ? null : artifact.title, door, composition, files, links, note };
+  return { title: artifact.media === 'note' ? null : artifact.title, media: artifact.media, door, composition, files, links, note };
 }
 
 // The back renders the maker's arrangement: quiet text, stills of the pieces
-// (§5 sanctions the full image on a back), links and files as plain outward
-// lines — never embedded players (D30); the door alone summons (D72).
+// (§5 sanctions the full image on a back), links as plain outward lines — and
+// **a sound or a take plays where it lies** (keeper's ruling, amends D30/D75).
+// A recording reached by a link is a download, which is not what a card is for:
+// it leaves the table for a file manager. So the back carries the player, ready
+// the moment the card turns, and the one word that used to summon it is gone.
 // The stream refuses a door that is not a place (D127); the renderer refuses
 // it a second time, because a back is built from whatever a maker arranged and
 // this is the one spot where that arrangement becomes a click.
+const AUDIO = /\.(m4a|mp3|wav|ogg|oga|aac|flac|opus)(\?|#|$)/i;
+const VIDEO = /\.(mp4|mov|webm|m4v|ogv)(\?|#|$)/i;
+
+// What kind of thing this is, asked of the arrangement first and the address
+// second. A hand deposit's recording is a `blob:` URL with no extension at all —
+// only the piece's own type, or the filename it was dropped under, knows.
+export function playsAs(src, { kind = null, name = null } = {}) {
+  if (kind === 'audio' || kind === 'video') return kind;
+  for (const s of [src, name]) {
+    if (typeof s !== 'string') continue;
+    if (AUDIO.test(s)) return 'audio';
+    if (VIDEO.test(s)) return 'video';
+  }
+  return null;
+}
+export const playable = (src, hints) => playsAs(src, hints) !== null;
+
+// A player on the parchment. `controls` because a recording you cannot pause or
+// scrub is a thing that happens to you; nothing autoplays, because the table
+// makes no sound nobody asked for.
+function playerFor(src, { rig = false, demoSrc = null, kind = null, name = null } = {}) {
+  const use = !rig && demoSrc ? demoSrc : src; // the deployed page plays the derivative (D75)
+  const as = playsAs(use, { kind, name });
+  if (!isPlace(use) || !as) return null;
+  const el = document.createElement(as);
+  el.className = `back__play back__play--${el.tagName.toLowerCase()}`;
+  el.src = use;
+  el.controls = true;
+  el.preload = 'metadata';
+  el.dataset.plays = ''; // the tap that works a player is not the tap that lays the card down
+  if (el.tagName === 'VIDEO') el.playsInline = true;
+  return el;
+}
+
 function line(text, href, download = null) {
   if (!isPlace(href)) return null;
   const a = document.createElement('a');
@@ -138,7 +175,7 @@ function buildNav() {
   return nav;
 }
 
-function buildBack(model) {
+function buildBack(model, opts = {}) {
   const back = document.createElement('div');
   back.className = 'card__back';
   // the arrangement lives in a flow the card can slide a page at a time; the
@@ -154,12 +191,27 @@ function buildBack(model) {
     append(title);
   }
 
+  const played = new Set(); // one player per recording, however many ways the back names it
+  const play = (src, hints = {}) => {
+    if (!src || played.has(src)) return null;
+    const el = playerFor(src, { ...opts, ...hints });
+    if (el) played.add(src);
+    return el;
+  };
+
   if (model.door) {
-    const door = document.createElement('div');
-    door.className = 'back__door';
-    door.dataset.door = model.door.mode;
-    door.textContent = model.door.mode === 'play' ? 'play' : 'visit ↗';
-    append(door);
+    // a 'play' door IS a recording — the card's own media says which sort, which
+    // is the only thing that knows when the address is a blob (D147)
+    if (model.door.mode === 'play') {
+      append(play(model.door.src, { demoSrc: model.door.demoSrc, kind: model.media === 'video' ? 'video' : 'audio' }));
+    }
+    else {
+      const door = document.createElement('div');
+      door.className = 'back__door';
+      door.dataset.door = model.door.mode;
+      door.textContent = 'visit ↗';
+      append(door);
+    }
   }
 
   for (const entry of model.composition) {
@@ -169,7 +221,9 @@ function buildBack(model) {
       p.textContent = entry.text ?? '';
       append(p);
     } else if (entry.t === 'file') {
-      if (entry.src) append(line(entry.name ?? basename(entry.src), entry.src, entry.name));
+      if (!entry.src) continue;
+      if (playable(entry.src, { name: entry.name })) append(play(entry.src, { name: entry.name }));
+      else append(line(entry.name ?? basename(entry.src), entry.src, entry.name));
     } else if (entry.t === 'link' && !entry.embed) {
       if (entry.href) append(line(entry.href, entry.href));
     } else { // image · audio · video · embedded link — a still of the piece
@@ -191,11 +245,15 @@ function buildBack(model) {
       }
       append(fig);
       if (entry.t === 'link' && entry.href) append(line(entry.href, entry.href));
-      else if (entry.orig) append(line(fileLine, entry.orig, entry.name));
+      else if (entry.orig && playable(entry.orig, { kind: entry.t, name: entry.name })) {
+        append(play(entry.orig, { kind: entry.t, name: entry.name }));
+      } else if (entry.orig) append(line(fileLine, entry.orig, entry.name));
     }
   }
 
-  for (const f of model.files) append(line(f.name, f.src, f.name));
+  for (const f of model.files) {
+    append(playable(f.src, { name: f.name }) ? play(f.src, { name: f.name }) : line(f.name, f.src, f.name));
+  }
   for (const href of model.links) append(line(href, href));
   if (model.note) {
     const note = document.createElement('div');
@@ -207,7 +265,15 @@ function buildBack(model) {
   return back;
 }
 
-export function renderCard(artifact) {
+export function makersLine(people) {
+  const named = (Array.isArray(people) ? people : []).filter((n) => typeof n === 'string' && n.trim());
+  const humans = named.filter((n) => n.trim() !== 'Claude');
+  const withClaude = humans.length !== named.length;
+  if (!humans.length) return withClaude ? 'Claude' : '';
+  return `${humans.map((n) => `@${n.trim()}`).join(' ')}${withClaude ? ' + Claude' : ''}`;
+}
+
+export function renderCard(artifact, opts = {}) {
   const el = document.createElement('article');
   el.className = `card card--${artifact.media} kind--${artifact.kind}`;
   el.style.borderRadius = cornerRadii(artifact.id);
@@ -265,6 +331,20 @@ export function renderCard(artifact) {
     front.append(caption);
   }
 
+  // Whose card this is, in the room's own grammar (D137): the makers as they
+  // would be mentioned. The table is a map of studios now, so the top of a pile
+  // has to say whose pile it is — the name is not decoration, it is the address.
+  // Claude reads "+ Claude" beside the humans and alone only for its own work:
+  // a card credited "E. + Claude" is E.'s (§3), and the front must not suggest
+  // otherwise.
+  const by = makersLine(artifact.people);
+  if (by) {
+    const line = document.createElement('div');
+    line.className = 'card__by';
+    line.textContent = by;
+    front.append(line);
+  }
+
   // The pivot is the part that turns: opacity and shadow live on the card
   // outside it, or they'd flatten the 3D context and mirror the front.
   const pivot = document.createElement('div');
@@ -274,7 +354,7 @@ export function renderCard(artifact) {
   const model = backModel(artifact);
   if (model) {
     el.classList.add('card--backed');
-    pivot.append(buildBack(model));
+    pivot.append(buildBack(model, opts));
   }
 
   el.append(pivot);
