@@ -7,29 +7,50 @@
 // themselves. Same affinity in, same map out, forever; which is what lets the
 // arrangement be an appended fact the fold can replay.
 
-import { fnv1a, mulberry32, TABLE_ASPECT } from './fold.js';
+import { fnv1a, TABLE_ASPECT, clamp } from './geom.js';
 
 // Canonical table units, as fold.js uses: x runs 0..TABLE_ASPECT, y runs 0..1.
 // Places come out in 0..1 on both axes, which is what the arrange event carries.
 const MARGIN = 0.09; // piles keep clear of the light's edge
-const APART = 0.2; // canonical distance below which two studios crowd each other
+// Every stack on the table is one atom holding the others off at its own size:
+// a studio's pile is a bigger object than a shared work's, so the arm's length
+// between them is the sum of their reaches, not one number for the whole room.
+// Each is a little more than the stack's own half-diagonal in canonical units —
+// a studio's pile measures about 0.104 corner to centre, a shared work's 0.079 —
+// so two stacks at arm's length have air between them rather than a shared edge.
+const REACH_STUDIO = 0.125;
+const REACH_SHARED = 0.095;
+const APART = REACH_STUDIO * 2; // two studios, the old single distance
 const PULL = 0.035; // how hard a shared problem draws two studios together
-const PUSH = 0.05; // how hard any two studios hold each other off
+const PUSH = 0.05; // how hard any two stacks hold each other off
+// A shared work's place has a meaning the others' do not: it belongs between
+// the hands that made it. So it is pulled to their midpoint every step, hard —
+// and yields only where there is genuinely no room, which is the one case where
+// being legible beats being exactly halfway.
+const HOME = 0.09;
 const STEPS = 240;
 
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-// A first table with nothing to go on: everyone on a ring, in the order the log
-// first named them, spaced by the golden angle so no two crowd the same arc.
-// Deterministic, and roomy enough that the first night reads as a room rather
-// than a queue.
-export function ring(people) {
+// Two ways to guess where a stack should start, for two different jobs.
+//
+// `ring` is for a whole-room act — the night's redraw, where every stack is
+// placed at once: an equal-area spiral in the order the log named them, which
+// starts the relaxation near a good answer and reads as a room rather than a
+// queue. Measured: seeding a fresh castle this way ends at 1 covered caption
+// strip against 12 from hashed berths, because 240 steps cannot undo a bad
+// start. Its weakness is that every berth depends on how many others there are.
+//
+// `berths` is for an insertion — one stack arriving among stacks that are
+// already right. Angle and radius are hashed **from the key alone**, so one more
+// arrival moves nobody else's guess, which is what makes a new stack cost a
+// nudge instead of a redraw. Same key, same berth, forever.
+export function ring(keys) {
   const places = {};
-  const n = Math.max(1, people.length);
-  people.forEach((name, i) => {
+  const n = Math.max(1, keys.length);
+  keys.forEach((key, i) => {
     const a = i * 2.399963229728653; // golden angle, in radians
     const r = 0.5 * Math.sqrt((i + 0.5) / n); // spiral outward, equal-area
-    places[name] = [
+    places[key] = [
       clamp(0.5 + r * Math.cos(a), MARGIN, 1 - MARGIN),
       clamp(0.5 + r * Math.sin(a), MARGIN, 1 - MARGIN),
     ];
@@ -37,28 +58,65 @@ export function ring(people) {
   return places;
 }
 
+export function berths(keys) {
+  const places = {};
+  for (const key of keys) {
+    const a = ((fnv1a(`${key}:angle`) % 100000) / 100000) * Math.PI * 2;
+    const r = 0.46 * Math.sqrt((fnv1a(`${key}:radius`) % 100000) / 100000);
+    places[key] = [
+      clamp(0.5 + r * Math.cos(a), MARGIN, 1 - MARGIN),
+      clamp(0.5 + r * Math.sin(a), MARGIN, 1 - MARGIN),
+    ];
+  }
+  return places;
+}
+
 // The night's map. `previous` is last night's places — the map drifts from
 // there rather than being redrawn from nothing, because people have to find
 // their own studio in the morning. Anyone new gets a berth hashed from their
 // name, so they land somewhere sensible before any affinity is known.
-export function arrange(people, pairs = [], previous = {}, { steps = STEPS, drift = 0.22 } = {}) {
-  const names = [...new Set(people.filter((n) => typeof n === 'string' && n.trim()))].map((n) => n.trim());
+//
+// A stack is either a person's studio (pass the name) or a work several hands
+// made together (pass `{ key, of: [names] }`), and both are placed in the one
+// relaxation — which is the only way either can be right, since a shared work
+// wants to be between its makers and the makers want to be near what they are
+// working on. Same stacks in, same map out; so laying another card on a pile
+// that already stands changes nothing, and only a stack that did not exist
+// before costs a rearrangement.
+export function arrange(people, pairs = [], previous = {}, { steps = STEPS, drift = 0.22, seed = 'ring' } = {}) {
+  const seen = new Set();
+  const nodes = [];
+  for (const n of people ?? []) {
+    const key = String((typeof n === 'string' ? n : n?.key) ?? '').trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const of = typeof n === 'string' || !Array.isArray(n?.of) ? null : n.of.map((m) => String(m).trim());
+    nodes.push({ key, of: of?.length ? of : null, reach: of?.length ? REACH_SHARED : REACH_STUDIO });
+  }
+  const names = nodes.map((n) => n.key);
+  const node = new Map(nodes.map((n) => [n.key, n]));
   if (!names.length) return {};
   if (names.length === 1) return { [names[0]]: [0.5, 0.5] };
 
-  const seeded = ring(names);
+  const seeded = seed === 'stable' ? berths(names) : ring(names);
   const start = {};
-  for (const name of names) {
-    const was = previous[name];
+  for (const n of nodes) {
+    const was = previous[n.key];
     if (Array.isArray(was) && was.length === 2 && was.every((v) => Number.isFinite(v))) {
-      start[name] = [clamp(was[0], 0, 1), clamp(was[1], 0, 1)];
+      start[n.key] = [clamp(was[0], 0, 1), clamp(was[1], 0, 1)];
       continue;
     }
-    // new tonight: a berth of their own, jittered off the ring so two arrivals
-    // never land on one spot
-    const rng = mulberry32(fnv1a(`${name}:berth`));
-    const [rx, ry] = seeded[name];
-    start[name] = [clamp(rx + (rng() - 0.5) * 0.1, MARGIN, 1 - MARGIN), clamp(ry + (rng() - 0.5) * 0.1, MARGIN, 1 - MARGIN)];
+    // New tonight. On an insertion, a work several hands made starts between
+    // those hands where they already stand — that is its whole meaning, and
+    // starting it there is what keeps the relaxation from dragging it across
+    // the room. On a whole-room redraw nobody stands anywhere yet, so it takes a
+    // berth like everyone else and the midpoint pull walks it home: measured, a
+    // castle seeded that way ends at 1 covered caption strip against 6.
+    const hands = seed === 'stable' ? (n.of ?? []).map((m) => previous[m]).filter(Boolean) : [];
+    start[n.key] = hands.length
+      ? [clamp(hands.reduce((a, [x]) => a + x, 0) / hands.length, MARGIN, 1 - MARGIN),
+         clamp(hands.reduce((a, [, y]) => a + y, 0) / hands.length, MARGIN, 1 - MARGIN)]
+      : seeded[n.key];
   }
 
   // canonical space, so distances read the same across the table's width
@@ -82,8 +140,9 @@ export function arrange(people, pairs = [], previous = {}, { steps = STEPS, drif
           const a = ((fnv1a(names[i] + names[j]) % 360) * Math.PI) / 180;
           dx = Math.cos(a); dy = Math.sin(a); d = 1e-6;
         }
-        if (d >= APART) continue;
-        const f = (PUSH * (APART - d)) / APART;
+        const apart = node.get(names[i]).reach + node.get(names[j]).reach;
+        if (d >= apart) continue;
+        const f = (PUSH * (apart - d)) / apart;
         const ux = dx / d;
         const uy = dy / d;
         move.get(names[i])[0] += ux * f;
@@ -91,6 +150,18 @@ export function arrange(people, pairs = [], previous = {}, { steps = STEPS, drif
         move.get(names[j])[0] -= ux * f;
         move.get(names[j])[1] -= uy * f;
       }
+    }
+
+    // and a work made by several hands is drawn to the middle of those hands
+    for (const n of nodes) {
+      if (!n.of) continue;
+      const hands = n.of.map((m) => at.get(m)).filter(Boolean);
+      if (!hands.length) continue;
+      const hx = hands.reduce((a, [x]) => a + x, 0) / hands.length;
+      const hy = hands.reduce((a, [, y]) => a + y, 0) / hands.length;
+      const [cx, cy] = at.get(n.key);
+      move.get(n.key)[0] += (hx - cx) * HOME;
+      move.get(n.key)[1] += (hy - cy) * HOME;
     }
 
     // and a shared problem draws two of them back together

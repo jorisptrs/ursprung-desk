@@ -71,8 +71,18 @@ export const castleEvents = (() => {
 
   // The arrangement, made the way a night's redraw makes it: affinity from the
   // log, geometry from the solver, and the result appended as an ordinary fact.
+  // Every stack is placed in the one relaxation — a studio for each person, and
+  // a place between the hands for each work they made together.
+  const shared = new Map();
+  for (const d of deposits) {
+    const makers = [...new Set(d.artifact.people)].filter((n) => n !== 'Claude').sort();
+    if (makers.length > 1) shared.set(makers.join(' + '), makers);
+  }
   const places = arrange(
-    [...new Set(deposits.flatMap((d) => d.artifact.people))],
+    [
+      ...new Set(deposits.flatMap((d) => d.artifact.people)),
+      ...[...shared].map(([key, of]) => ({ key, of })),
+    ],
     coauthorship(deposits),
   );
   return [...deposits, { e: 'arrange', night: 4, places, why: 'who has been working with whom, four nights in' }];

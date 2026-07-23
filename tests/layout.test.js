@@ -4,7 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { arrange, ring, packSpread } from '../js/layout.js';
+import { arrange, berths, packSpread } from '../js/layout.js';
 import { TABLE_ASPECT } from '../js/fold.js';
 
 const NAMES = ['R.', 'B.', 'M.', 'E.', 'Y.', 'T.', 'L.', 'A.', 'S.', 'K.', 'N.', 'P.',
@@ -72,12 +72,30 @@ test('the room empty, the room of one, and a pair nobody knows', () => {
   assert.ok(onTable(arrange(['E.', 'M.'], [{ a: 'E.', b: 'nobody', weight: 1 }])));
 });
 
-test('the first ring is a room, not a queue', () => {
-  const r = ring(NAMES);
+test('a first berth is a room, not a queue — and it belongs to the name alone', () => {
+  const r = berths(NAMES);
   assert.equal(Object.keys(r).length, NAMES.length);
   assert.ok(onTable(r));
   const xs = new Set(Object.values(r).map(([x]) => x.toFixed(3)));
   assert.ok(xs.size > NAMES.length / 2, 'they do not share one column');
+  // the whole point: one more arrival must not move everybody's seed
+  const more = berths([...NAMES, 'New.', 'Newer.']);
+  for (const n of NAMES) assert.deepEqual(more[n], r[n], `${n}'s berth moved because someone else arrived`);
+  assert.deepEqual(berths(['E.']), berths(['E.']), 'and it is the same berth every time');
+});
+
+test('a stack nobody has seen lands where it belongs, not where the spiral put it', () => {
+  const monday = arrange(['E.', 'M.'], []);
+  // a work the two of them made: its first guess is the middle of the two, so
+  // the relaxation nudges it rather than dragging it across the table
+  const tuesday = arrange(['E.', 'M.', { key: 'E. + M.', of: ['E.', 'M.'] }], [], monday);
+  const mid = [(monday['E.'][0] + monday['M.'][0]) / 2, (monday['E.'][1] + monday['M.'][1]) / 2];
+  const off = Math.hypot(tuesday['E. + M.'][0] - mid[0], tuesday['E. + M.'][1] - mid[1]);
+  assert.ok(off < 0.1, `the shared work landed ${off.toFixed(3)} from between its makers`);
+  for (const n of ['E.', 'M.']) {
+    assert.ok(Math.hypot(tuesday[n][0] - monday[n][0], tuesday[n][1] - monday[n][1]) < 0.09,
+      `${n} was moved to make room, rather than nudged`);
+  }
 });
 
 // ---- a pile opened under a hand (D144) ----

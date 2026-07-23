@@ -88,6 +88,18 @@ export function createStream() {
       return;
     }
 
+    // The cohort. The curator registers people before anyone deposits anything,
+    // and the table opens as a room of named empty places rather than as a void
+    // that fills — which is also what gives a thread from a shared work
+    // somewhere to land when one of its makers has laid nothing alone. It is an
+    // ordinary appended fact, so replay walks it like everything else, and it
+    // accumulates: a later roster adds people, it never unmakes them.
+    if (event.e === 'roster') {
+      if (!Array.isArray(event.people) || !event.people.length) reject('a roster with nobody in it is not a roster');
+      if (!event.people.every(isFilled)) reject('every place on the roster belongs to a name');
+      return;
+    }
+
     // Where each studio stands tonight. The arrangement is judged elsewhere —
     // by whoever or whatever read the work — and enters here as an ordinary
     // appended fact, so `fold` stays a pure function of the log and replay can

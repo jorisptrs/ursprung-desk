@@ -30,6 +30,17 @@ import { materialize, peaksToSvg } from '../js/deposit.js';
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 export const dropFileIn = (root) => join(root, 'drop', 'stream.jsonl');
+
+// The one way anything reaches the log: one line, appended, never rewritten
+// (§9). Deposits come through the door's own machinery below; a roster comes
+// straight through here, because registering the cohort is a curator's act with
+// nothing to validate but the names.
+export function appendEvent(root, event) {
+  const file = dropFileIn(root);
+  mkdirSync(dirname(file), { recursive: true });
+  appendFileSync(file, `${JSON.stringify(event)}\n`);
+  return event;
+}
 export const assetDirIn = (root) => join(root, 'drop', 'assets');
 
 // Copied rather than imported — eight entries, and the stream owns the enum
@@ -512,9 +523,7 @@ export function createDeskSink({ root = ROOT, prefix = 'm', warn = () => {} } = 
         }
         if (trace.source) copyFileSync(trace.from, trace.source.to); // the work itself, untouched (D80)
       }
-      const file = dropFileIn(root);
-      mkdirSync(dirname(file), { recursive: true });
-      appendFileSync(file, `${JSON.stringify(event)}\n`); // one line, append-only (§9)
+      appendEvent(root, event);
 
       return { id, night, event };
     },

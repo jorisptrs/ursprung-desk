@@ -64,15 +64,15 @@ html.rig, html.rig body { cursor: none; }
 .studio {
   position: absolute;
   transform: translate(-50%, -50%);
-  color: color-mix(in srgb, var(--parchment) 34%, transparent);
+  color: color-mix(in srgb, var(--parchment) 46%, transparent);
   font-size: clamp(9px, 1.1cqmin, 15px);
   letter-spacing: 0.04em;
   white-space: nowrap;
 }
 
-.studio[data-held="0"] {
-  color: color-mix(in srgb, var(--parchment) 52%, transparent);
-}
+/* the name is the empty place itself — the first card to land on it says the
+   same thing better, so the writing goes */
+.studio:not([data-held="0"]) { display: none; }
 
 .thread {
   position: absolute;
@@ -237,22 +237,71 @@ html.rig, html.rig body { cursor: none; }
   color: var(--ink-muted);
 }
 
-/* A recording plays where it lies (D147). Native controls: they are the one
-   piece of chrome the desk keeps, because a transport everyone already knows
-   how to work beats a beautiful one nobody does. */
-.back__play {
-  width: 100%;
-  max-width: 100%;
-  display: block;
-}
+/* A recording plays where it lies (D147/D151), on the desk's own transport: a
+   mark to press and a thin amber line to travel — the same amber a thread is
+   drawn in. One line tall, so a sound takes no more of a back than a sentence. */
+.back__play { width: 100%; }
 
-.back__play--audio { height: 2.4em; }
+.back__play audio { display: none; } /* the sound has no face; the bar is its face */
 
-.back__play--video {
-  max-height: var(--piece-max, 14em);
-  background: #100d0a;
+.play__frame {
   border-radius: 3px;
+  overflow: hidden;
+  background: #100d0a;
+  max-height: var(--piece-max, 12em);
 }
+
+.play__frame video { display: block; width: 100%; max-height: inherit; }
+
+.play__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  height: 1.5em;
+}
+
+.play__mark {
+  font-size: 0.6em;
+  line-height: 1;
+  color: #6f5a33;
+  user-select: none;
+  cursor: pointer;
+  width: 1.1em; /* ▶ and ▮▮ are different widths — the line must not shift under the press */
+  text-align: center;
+  flex: none;
+}
+
+.play__line {
+  flex: 1 1 auto;
+  height: 1.5px;
+  border-radius: 1px;
+  background: rgba(43, 36, 24, 0.2);
+  cursor: pointer;
+  position: relative;
+}
+
+.play__run {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-radius: inherit;
+  background: rgba(196, 154, 88, 0.9); /* --amber, as a thread is */
+}
+
+.play__at {
+  font-size: 0.55em;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums; /* the count must not jitter as it counts */
+  flex: none;
+}
+
+/* A quest is a question the room is holding open, not a work. It used to be
+   marked by being faded, and nothing on this table is faded now — so the words
+   carry it: set in the hand it was asked in. */
+.kind--quest .card__front { font-style: italic; }
 
 /* Whose card this is. Dimmer than the caption and set apart from it: the eye
    finds the pile by it without reading it as part of the work's own words. */

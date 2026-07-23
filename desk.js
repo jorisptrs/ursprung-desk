@@ -181,7 +181,10 @@ async function main() {
     if (!cardEl?.dataset.id) { view.spreadPile(null); return; } // empty table is pointer territory (below)
     const sel = getSelection();
     if (pressDrag || (sel && !sel.isCollapsed)) return; // marking text to copy keeps the card as it is
-    if (event.target.closest('[data-plays]')) return; // working a player is not putting the card down
+    if (event.target.closest('[data-plays]')) { // working a player is not putting the card down
+      view.workPlayer(event.target);
+      return;
+    }
     const pageEl = event.target.closest('[data-page]'); // turning a leaf is not putting the card down (D100)
     if (pageEl) {
       view.pageBack(cardEl.dataset.id, pageEl.dataset.page);
