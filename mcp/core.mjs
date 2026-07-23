@@ -13,7 +13,7 @@
 // bounds live in depositCard, above it.
 
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync, rmSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync, rmSync } from 'node:fs';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +22,10 @@ import { createStream } from '../js/stream.js';
 import { parseJsonl } from '../js/live.js';
 // The waveform's house style is the hand door's — one drawing, both doors, so
 // a card cut here and a card cut on a phone are the same card (D117).
-import { peaksToSvg } from '../js/deposit.js';
+// materialize is the hand door's own slot-filler, and it already takes the
+// urlFor that decides where a blob lands — so the server fills the sheet's
+// null slots with exactly the code the browser fills them with (D85).
+import { materialize, peaksToSvg } from '../js/deposit.js';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -46,6 +49,15 @@ export const WORDS_MEDIA = ['text', 'code', 'note'];
 
 export const DOOR_KINDS = ['work', 'failure', 'quest', 'fieldnotes']; // meta is the curator's (D108)
 export const OWNED_FIELDS = ['id', 'night', 'provenance', 'visibility']; // the door names itself (D65)
+// The hand door's page composes provenance and visibility itself, because it
+// IS the hand door and has always said so — refusing it for saying something
+// true would be friction with nothing behind it. What no client may choose is
+// where its card sits in the log, so id and night are still refused in words.
+// The distinction is who is on the other side: a session is a model, and a
+// model reaching for `provenance` has misunderstood something worth hearing
+// about (D107); the sheet is the desk's own page, and the door simply signs
+// over whatever it claimed.
+export const HAND_OWNED = ['id', 'night'];
 
 const STILL_EXT = /\.(png|jpe?g|gif|webp|avif|svg)$/i;
 const AUDIO_EXT = /\.(m4a|mp3|wav|ogg|oga|flac|aac|aiff?)$/i;
@@ -155,6 +167,25 @@ export function localAuthor(root = ROOT) {
   return process.env.USER || process.env.LOGNAME || null;
 }
 
+// "Was this file run directly?" is fiddlier than it looks, and getting it
+// wrong is silent both ways: a door that never starts and answers nothing
+// (D122), or a module that starts a server merely because something imported
+// it. Two spellings of one path diverge in practice — import.meta.url
+// percent-encodes the spaces in this repo's own name, and a path under a
+// symlink (macOS /tmp → /private/tmp) resolves differently on each side — so
+// compare real paths, and never widen the test to "somewhere near here".
+export function isMainModule(importMetaUrl) {
+  if (!process.argv[1]) return false;
+  const here = fileURLToPath(importMetaUrl);
+  const invoked = resolve(process.argv[1]);
+  if (here === invoked) return true;
+  try {
+    return realpathSync(here) === realpathSync(invoked);
+  } catch {
+    return false;
+  }
+}
+
 // A refusal the door raised (as opposed to the stream's own words).
 export class Refusal extends Error {
   constructor(message) {
@@ -209,8 +240,8 @@ export function readStream({ root = ROOT, warn = () => {} } = {}) {
 
 // ---- the door's own guards (never the stream's business) ----
 
-export function refuseOwnedFields(input) {
-  const named = OWNED_FIELDS.filter((f) => input?.[f] !== undefined);
+export function refuseOwnedFields(input, fields = OWNED_FIELDS) {
+  const named = fields.filter((f) => input?.[f] !== undefined);
   if (!named.length) return null;
   return `the desk sets ${named.join(' and ')} itself — leave ${named.length > 1 ? 'them' : 'it'} out`;
 }
@@ -313,25 +344,106 @@ export function buildArtifact(input) {
   return a;
 }
 
+// ---- payloads: heavy things live beside the log, never inside it ----
+
+// BRIEF §9's one amendment to append-only is that facts are append-only and
+// payloads are deletable: heavy media lives as files the log points at, so a
+// withdrawal can delete the bytes while the history stays honest. A data: URL
+// baked into a line cannot be deleted without rewriting that line — so every
+// one the depositor's device cut on its way here is written out to
+// drop/assets/ before the line is written.
+const DATA_HEAD = /^data:([^,]*),/i;
+
+const EXT_FOR_TYPE = {
+  'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp',
+  'image/avif': '.avif', 'image/svg+xml': '.svg', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a',
+  'audio/wav': '.wav', 'audio/ogg': '.ogg', 'video/mp4': '.mp4', 'video/quicktime': '.mov',
+  'video/webm': '.webm',
+};
+
+// A blob at this door is a File's three parts minus the browser:
+// { name, type, bytes }. The extension comes from the depositor's own filename
+// first and the declared type second — an unnamed, untyped blob shelves bare.
+export function blobExt(blob) {
+  const named = extname(blob?.name ?? '').toLowerCase();
+  if (named) return named;
+  return EXT_FOR_TYPE[String(blob?.type ?? '').toLowerCase()] ?? '';
+}
+
+export function dataUrlParts(url) {
+  const m = DATA_HEAD.exec(String(url ?? ''));
+  if (!m) return null;
+  const head = m[1];
+  const body = String(url).slice(m[0].length);
+  try {
+    return {
+      type: head.split(';')[0] || 'text/plain',
+      bytes: /;base64/i.test(head) ? Buffer.from(body, 'base64') : Buffer.from(decodeURIComponent(body), 'utf8'),
+    };
+  } catch {
+    return null; // malformed: left exactly as it came, for the stream to judge
+  }
+}
+
+// Plans every file this card puts beside the log and rewrites the artifact to
+// point at them — but writes nothing. The writing happens only after the
+// stream has agreed, so a refused card leaves no stray asset behind.
+export function planPayloads(artifact, blobs, id, root) {
+  const writes = [];
+  const seen = new Map(); // one blob, one file: composeArtifact hands the same
+  // File to a piece and to the experience door that summons it
+  const place = (bytes, ext) => {
+    const name = `${id}-${writes.length}${ext}`;
+    writes.push({ bytes, to: join(assetDirIn(root), name) });
+    return `drop/assets/${name}`;
+  };
+  const forBlob = (blob) => {
+    if (seen.has(blob)) return seen.get(blob);
+    const at = place(blob.bytes, blobExt(blob));
+    seen.set(blob, at);
+    return at;
+  };
+  const finished = materialize(artifact, blobs, forBlob);
+
+  const external = (v) => {
+    if (typeof v !== 'string' || !v.startsWith('data:')) return v;
+    const parts = dataUrlParts(v);
+    return parts ? place(parts.bytes, EXT_FOR_TYPE[parts.type] ?? '') : v;
+  };
+  if (finished.excerpt?.src) finished.excerpt = { ...finished.excerpt, src: external(finished.excerpt.src) };
+  const comp = finished.detail?.composition;
+  if (Array.isArray(comp)) {
+    finished.detail = {
+      ...finished.detail,
+      composition: comp.map((e) => (e && typeof e === 'object'
+        ? { ...e, ...(e.src ? { src: external(e.src) } : {}), ...(e.embed ? { embed: external(e.embed) } : {}) }
+        : e)),
+    };
+  }
+  return { finished, writes };
+}
+
 // ---- the sink: the tray's face, and nothing stricter than the stream ----
 
-export function createDeskSink({ root = ROOT, warn = () => {} } = {}) {
+// One sink, both doors (D106). What differs is only what a blob IS: the MCP
+// door hands a path on this machine and the desk cuts the trace from it (D117),
+// while the hand door hands the bytes themselves, already cut on the
+// depositor's own device (D81), to fill the slots the sheet left null (D85).
+// The prefix is whose numbering this is — m-### at the terminal, h-### at the
+// hand door; every fork numbers its own (D19).
+export function createDeskSink({ root = ROOT, prefix = 'm', warn = () => {} } = {}) {
   return {
-    // blobs: { excerpt: '<path to a still> ' } — node-side blobs are file paths.
-    // Back-shelved files arrive with stage→confirm (§7 step 5); anything else here
-    // is refused rather than silently dropped.
+    // blobs — MCP: { excerpt: '<path on this machine>' }.
+    //         hand: { 'piece:N': blob, experience: blob }, blob = { name, type, bytes }.
     deposit(artifact, blobs = {}) {
-      const extra = Object.keys(blobs).filter((k) => k !== 'excerpt');
-      if (extra.length) throw new Refusal('shelving files on a back arrives with stage→confirm — v0 backs carry text and links');
-
       const { stream } = readStream({ root, warn });
       const events = stream.all();
-      const id = nextId(events, 'm');
+      const id = nextId(events, prefix);
       const night = highestNight(events);
 
-      const finished = { ...artifact, id, excerpt: { ...artifact.excerpt } };
+      let finished = { ...artifact, id, excerpt: { ...artifact.excerpt } };
       let trace = null; // what lands in drop/assets, once the stream has agreed
-      if (blobs.excerpt) {
+      if (typeof blobs.excerpt === 'string') { // the MCP door's path on this machine
         const from = blobs.excerpt;
         const kind = cutKind(from);
         const ext = kind === 'audio' ? '.svg' : kind === 'video' ? '.jpg' : extname(from).toLowerCase();
@@ -370,11 +482,21 @@ export function createDeskSink({ root = ROOT, warn = () => {} } = {}) {
         }
       }
 
+      // The hand door's blobs fill their null slots, and any data: URL the
+      // device cut becomes a file — both planned, neither written yet.
+      const handBlobs = Object.fromEntries(Object.entries(blobs).filter(([k]) => k !== 'excerpt'));
+      const planned = planPayloads(finished, handBlobs, id, root);
+      finished = planned.finished;
+
       const event = { e: 'deposit', night, artifact: finished };
       stream.append(event); // the stream's words, verbatim, if this throws
 
       // Validated before anything touches the disk: a refused card leaves no
       // stray asset and no half-written line.
+      if (planned.writes.length) {
+        mkdirSync(assetDirIn(root), { recursive: true });
+        for (const w of planned.writes) writeFileSync(w.to, w.bytes);
+      }
       if (trace) {
         mkdirSync(assetDirIn(root), { recursive: true });
         if (trace.kind === 'audio') { // the recording attests through its own shape (D117)
@@ -400,23 +522,77 @@ export function createDeskSink({ root = ROOT, warn = () => {} } = {}) {
   };
 }
 
+// ---- an uploaded file, made local ----
+
+// Over HTTP the work sits on the depositor's laptop, not on this machine, so
+// it arrives as bytes. Written under the depositor's own filename, it becomes
+// exactly what the stdio door has always been handed — a path — and every
+// guard below applies unchanged: the kind gate, the size bound, the ffmpeg
+// cut, the refusals and their wording. The name is the person's, so a refusal
+// still speaks about the file they handed over and not about a temp path.
+export function bytesToFile(bytes, name = 'upload') {
+  const dir = mkdtempSync(join(tmpdir(), 'desk-upload-'));
+  const safe = basename(String(name)).replace(/[/\\]/g, '') || 'upload';
+  const at = join(dir, safe);
+  writeFileSync(at, bytes);
+  return { path: at, dispose: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
 // ---- the whole door, in one call ----
 
-export function depositCard(input, { root = ROOT, warn = () => {}, sink = null } = {}) {
-  const refused = doorRefusal(input, { localName: localAuthor(root) });
+// `author` is the participant the room server recognised from their token — a
+// name registered once, deliberately, rather than one the machine invented
+// (D121's principle kept, its mechanism moved to registration by the room
+// server). It fills `people` only when nothing was stated; a stated list always
+// travels exactly as stated, for the stream to judge (D107).
+export function depositCard(input, { root = ROOT, warn = () => {}, sink = null, author = null } = {}) {
+  const named = input?.people === undefined || (Array.isArray(input?.people) && input.people.length === 0);
+  const signed = named && isFilled(author) ? { ...input, people: [author] } : input;
+
+  const refused = doorRefusal(signed, { localName: author ?? localAuthor(root) });
   if (refused) throw new Refusal(refused);
 
-  const path = input.excerpt?.path;
+  const path = signed.excerpt?.path;
   if (isFilled(path)) {
-    const bad = refuseAsset(path, input.media);
+    const bad = refuseAsset(path, signed.media);
     if (bad) throw new Refusal(bad);
   }
 
-  const artifact = buildArtifact(input);
+  const artifact = buildArtifact(signed);
   if (JSON.stringify(artifact).length > MAX_ARTIFACT_BYTES) {
     throw new Refusal('this card is too heavy for a line — an excerpt travels as a path or a sentence, not as bytes');
   }
 
   const door = sink ?? createDeskSink({ root, warn });
   return door.deposit(artifact, isFilled(path) ? { excerpt: realpathSync(path) } : {});
+}
+
+// ---- the hand door, over the LAN ----
+
+// The sheet composes a whole artifact on the depositor's device, so unlike the
+// MCP door there is nothing to build here — only to refuse. The client is
+// never trusted: the fields the desk owns are refused rather than honoured,
+// the door names itself, and the stream remains the sole judge of shape (D107).
+export function depositHand(artifact, blobs = {}, { root = ROOT, warn = () => {}, sink = null, author = null } = {}) {
+  if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) throw new Refusal('a card is an object');
+  const owned = refuseOwnedFields(artifact, HAND_OWNED);
+  if (owned) throw new Refusal(owned);
+
+  const stated = Array.isArray(artifact.people) && artifact.people.length > 0;
+  const signed = {
+    ...artifact,
+    ...(stated ? {} : isFilled(author) ? { people: [author] } : {}),
+    // signed over, whatever the client claimed: the door knows which door it is
+    provenance: 'hand', // (D65)
+    visibility: 'public', // consent tiers arrive with their own step
+  };
+  if (!Array.isArray(signed.people) || !signed.people.some(isFilled)) {
+    throw new Refusal('a card needs an author — an @name in the text');
+  }
+  // The author is always on the front, at both doors (D88), and only where the
+  // maker wrote no caption of their own.
+  if (!isFilled(signed.caption) && signed.people.every(isFilled)) signed.caption = signed.people.join(' + ');
+
+  const door = sink ?? createDeskSink({ root, prefix: 'h', warn });
+  return door.deposit(signed, blobs);
 }

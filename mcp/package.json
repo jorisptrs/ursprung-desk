@@ -2,9 +2,11 @@
   "name": "desk-mcp",
   "private": true,
   "type": "module",
-  "description": "The desk's deposit door — local stdio MCP server (BRIEF §6, D34).",
+  "description": "The desk's doors — the stdio deposit door, and the room server that carries it and the hand door over the LAN (BRIEF §6, §7 step 5).",
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
+    "express": "5.2.1",
+    "qrcode": "1.5.4",
     "zod": "3.25.76"
   }
 }
