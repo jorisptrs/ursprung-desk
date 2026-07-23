@@ -888,6 +888,7 @@ export function createView(field, { rig = false } = {}) {
   }
 
   const pileOpen = () => openPile != null;
+  const inHand = () => flippedId;
 
   function relayThreads() {
     const byKey = new Map(lastState.threads.map((t) => [threadKey(t), t]));
@@ -903,5 +904,5 @@ export function createView(field, { rig = false } = {}) {
     relayThreads(); // cards are %/cqmin and re-flow by CSS
   }
 
-  return { renderInstant, playEvent, cancelActive, finishActive, onResize, flipJob, flipInstant, tapDoor, pageBack, spreadPile, pileOpen, workPlayer };
+  return { renderInstant, playEvent, cancelActive, finishActive, onResize, flipJob, flipInstant, tapDoor, pageBack, spreadPile, pileOpen, inHand, workPlayer };
 }

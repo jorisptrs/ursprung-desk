@@ -178,7 +178,17 @@ async function main() {
   field.addEventListener('click', (event) => {
     if (event.target.closest('a')) return; // shelved links behave as links
     const cardEl = event.target.closest('.card');
-    if (!cardEl?.dataset.id) { view.spreadPile(null); return; } // empty table is pointer territory (below)
+    // A tap on the wood steps back one thing at a time (keeper's ruling): the
+    // card in hand goes down first, into the pile it came out of if that pile is
+    // still spread; only once nothing is in hand does the next tap shut the
+    // pile. Undoing two things with one tap is how you lose the place you were
+    // reading from.
+    if (!cardEl?.dataset.id) {
+      const held = view.inHand();
+      if (held != null) { queue.push({ run: view.flipJob(held), maxMs: 1800 }); return; }
+      view.spreadPile(null);
+      return; // and past that, the empty table is pointer territory (below)
+    }
     const sel = getSelection();
     if (pressDrag || (sel && !sel.isCollapsed)) return; // marking text to copy keeps the card as it is
     if (event.target.closest('[data-plays]')) { // working a player is not putting the card down
@@ -216,7 +226,7 @@ async function main() {
   field.addEventListener('pointerdown', (event) => {
     if (rig || event.button !== 0) return;
     if (event.target.closest('.card, a, .keys-btn, .add-btn')) return;
-    if (view.pileOpen()) return; // the press that shuts a pile does not also step the stream
+    if (view.pileOpen() || view.inHand() != null) return; // the press that steps back does not also step the stream
     startScrub('step');
   });
   addEventListener('pointerup', stopScrub);

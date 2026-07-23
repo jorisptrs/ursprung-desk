@@ -129,6 +129,13 @@ export function attachHelper(field, { withKeys = false, deal = null, tail = fals
     toggle();
   });
   panel.addEventListener('click', close);
+  // and anywhere else: a panel that will not go away when you look elsewhere is
+  // a panel you have to learn to dismiss. The button stops its own click, so
+  // this never fights the toggle.
+  addEventListener('click', (event) => {
+    if (event.target instanceof Element && event.target.closest('.keys, .keys-btn')) return;
+    close();
+  });
   addEventListener('keydown', (event) => {
     if (event.target instanceof Element && event.target.closest('input, textarea, select, .sheet')) return; // typing on the sheet is typing
     if (event.key === '?') toggle();
