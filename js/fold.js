@@ -76,8 +76,13 @@ const FLOAT_SCALE = 0.4; // a mark between two studios, read by opening it
 const SETTLE_STEPS = 120;
 const SETTLE_DRIFT = 0.07;
 const PILE_SHOWS = 4; // past the fourth, a pile is just a pile — never a tally of output
-const PILE_STEP_X = 0.006; // the cascade of one pile, in canonical units
-const PILE_STEP_Y = 0.008;
+// The step of the cascade, as a fraction of the table. Set against the card's
+// own size rather than picked: a laid pile card is 0.0825 of the table wide and
+// 0.119 tall, so these are about a seventh of it each way — enough that every
+// card under the top one shows an edge, and a pile of four reads as four from
+// across a room rather than as one card with a shadow.
+const PILE_STEP_X = 0.008;
+const PILE_STEP_Y = 0.011;
 // A pile cascades around its studio's place rather than away from it, so the
 // place is the middle of the stack: it is where the studio's mark stands, where
 // the threads land, and where the next card arrives.
@@ -174,8 +179,21 @@ export function fold(events, t) {
       stated[key] = [clamp(said[0], 0.06, 0.94), clamp(said[1], 0.06, 0.94)];
     }
   }
+  // The affinity the log already carries, so a stack the arrangement has not
+  // heard of does not land beside a stranger: two people who made something
+  // together belong near each other, and the fold can see that without asking
+  // anyone. Deliberately unweighted — **that** they worked together, never how
+  // often — because a count grows with every card and the table must not move
+  // when a card is laid on a pile that already stands. How much a pair's history
+  // should weigh is a judgment for the night's redraw, not for the fold.
+  const ties = [];
+  for (const { of } of floats.values()) {
+    for (let i = 0; i < of.length; i++) {
+      for (let j = i + 1; j < of.length; j++) ties.push({ a: of[i], b: of[j], weight: 1 });
+    }
+  }
   const settled = stacks.length && stacks.length > Object.keys(stated).length
-    ? arrange(stacks, [], stated, { steps: SETTLE_STEPS, drift: SETTLE_DRIFT, seed: 'stable' })
+    ? arrange(stacks, ties, stated, { steps: SETTLE_STEPS, drift: SETTLE_DRIFT, seed: 'stable' })
     : stated;
   const at = new Map(stacks.map((stack) => {
     const key = typeof stack === 'string' ? stack : stack.key;
@@ -227,7 +245,7 @@ export function fold(events, t) {
     for (const m of top.makers) {
       if (!at.has(m)) continue;
       const [x, y] = at.get(m);
-      anchorThreads.push({ from: top.id, toPlace: [round4(x), round4(y)], anchor: true, opacity: top.opacity });
+      anchorThreads.push({ from: top.id, to: null, toStack: m, toPlace: [round4(x), round4(y)], anchor: true, opacity: top.opacity });
     }
   }
   const threads = arrived

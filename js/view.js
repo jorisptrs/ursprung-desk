@@ -26,6 +26,7 @@ const READ_H_FRAC = 0.6; // of its height, so a grown card still lies in the lig
 const READ_MAX = 560; // px
 const READ_MIN = 200;
 const OPEN_H_FRAC = 0.86; // the tallest a card in hand may stand
+const FONT_OF_W = 0.075; // a card's type, as a fraction of its width — laid or in hand
 const PIECE_MAX_FRAC = 0.66; // of that: a still shares its leaf, never takes it whole (D102)
 
 const threadKey = (t) => `${t.from}→${t.to ?? (t.toPlace ?? []).join(',')}`;
@@ -122,22 +123,33 @@ export function createView(field, { rig = false } = {}) {
     motionTimer = setTimeout(() => { delete field.dataset.opening; }, 320);
   }
 
-  // The box a thread must stop short of at a studio's place: the written name if
-  // the studio stands empty, a bare point once a pile covers it.
-  const MARK_GAP = 5; // px of air between the string and the letters
-  function placeBoxPx([px, py]) {
+  // What a thread must stop short of at a studio's place: the pile standing
+  // there, or — where the studio is still empty — the name written on the wood.
+  // Never the bare point, which is the middle of the stack and would run the
+  // string in under the cards and out the other side.
+  const MARK_GAP = 5; // px of air between the string and what it points at
+  function placeBoxPx(thread, state) {
+    const [px, py] = thread.toPlace;
     const cx = px * rect.w;
     const cy = py * rect.h;
-    for (const el of markEls.values()) {
-      if (el.dataset.held !== '0') continue;
-      const at = el.offsetLeft + el.offsetWidth / 2;
-      const to = el.offsetTop + el.offsetHeight / 2;
-      if (Math.hypot(at - cx, to - cy) > 2) continue;
-      const w = el.offsetWidth / 2 + MARK_GAP;
-      const h = el.offsetHeight / 2 + MARK_GAP;
-      return { cx, cy, x1: cx - w, y1: cy - h, x2: cx + w, y2: cy + h };
+    const bare = { cx, cy, x1: cx, y1: cy, x2: cx, y2: cy };
+
+    const mine = state.cards.filter((c) => (c.pile ?? c.between) === thread.toStack);
+    if (mine.length) {
+      const box = { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity };
+      for (const c of mine) {
+        const b = cardBoxPx(c);
+        box.x1 = Math.min(box.x1, b.x1); box.y1 = Math.min(box.y1, b.y1);
+        box.x2 = Math.max(box.x2, b.x2); box.y2 = Math.max(box.y2, b.y2);
+      }
+      return { cx, cy, x1: box.x1 - MARK_GAP, y1: box.y1 - MARK_GAP, x2: box.x2 + MARK_GAP, y2: box.y2 + MARK_GAP };
     }
-    return { cx, cy, x1: cx, y1: cy, x2: cx, y2: cy };
+
+    const el = markEls.get(thread.toStack);
+    if (!el || el.dataset.held !== '0') return bare;
+    const w = el.offsetWidth / 2 + MARK_GAP;
+    const h = el.offsetHeight / 2 + MARK_GAP;
+    return { cx, cy, x1: cx - w, y1: cy - h, x2: cx + w, y2: cy + h };
   }
 
   const cardBoxPx = (card) => {
@@ -158,19 +170,27 @@ export function createView(field, { rig = false } = {}) {
   function settleCard(el, card, z) {
     el.style.left = `${(card.x * 100).toFixed(2)}%`;
     el.style.top = `${(card.y * 100).toFixed(2)}%`;
-    // width and font floor together (same breakpoint), so shape never distorts
-    el.style.width = `max(${(CARD_W * 100 * card.scale).toFixed(2)}cqmin, ${Math.round(FLOOR_W * card.scale)}px)`;
-    el.style.fontSize = `max(${(CARD_W * 100 * card.scale * 0.075).toFixed(3)}cqmin, ${(FLOOR_W * 0.075 * card.scale).toFixed(1)}px)`;
     const pivot = el.querySelector('.card__pivot');
     el.toggleAttribute('data-lit', card.id === flippedId || pileKey(card) === openPile);
-    if (card.id === flippedId) { // in hand: grown, straightened, lifted, fully lit
-      // height first, so the in-hand pose is computed on the true size
-      layoutOpenBack(el);
+    if (card.id === flippedId) {
+      // A card in hand is set at its reading size, not blown up to it: a
+      // transform scale resamples what was already painted, so at ×4 the text
+      // was a photograph of text. Growing the box instead makes the browser lay
+      // the type out again at the size it is read at, which is the whole point
+      // of picking a card up. The turn still rides a transform — motion is what
+      // a compositor is for — but it lands on a real size (D155).
+      const w = readWidthPx(card);
+      el.style.width = `${w.toFixed(1)}px`;
+      el.style.fontSize = `${(w * FONT_OF_W).toFixed(2)}px`;
+      layoutOpenBack(el); // height after width, so it measures the true box
       el.style.transform = flippedTransform(card, el);
       el.style.opacity = 1;
       el.style.zIndex = 400;
       if (pivot) pivot.style.transform = 'rotateY(180deg)';
     } else {
+      // width and font floor together (same breakpoint), so shape never distorts
+      el.style.width = `max(${(CARD_W * 100 * card.scale).toFixed(2)}cqmin, ${Math.round(FLOOR_W * card.scale)}px)`;
+      el.style.fontSize = `max(${(CARD_W * 100 * card.scale * FONT_OF_W).toFixed(3)}cqmin, ${(FLOOR_W * FONT_OF_W * card.scale).toFixed(1)}px)`;
       closeBack(el);
       el.style.transform = laidKeyframe(card);
       el.style.opacity = card.opacity;
@@ -231,7 +251,6 @@ export function createView(field, { rig = false } = {}) {
   // stand, it stays at that height and the arrangement pages. Pure layout —
   // called on settle and whenever a leaf is turned.
   function layoutOpenBack(el) {
-    const grow = flipGrow(el);
     const back = el.querySelector('.card__back');
     const flow = back?.querySelector('.back__flow');
     if (!back || !flow) { el.style.height = ''; return; }
@@ -242,7 +261,7 @@ export function createView(field, { rig = false } = {}) {
       return (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
     };
     const laidH = el.offsetHeight;
-    const maxH = (rect.h * OPEN_H_FRAC) / grow;
+    const maxH = rect.h * OPEN_H_FRAC; // the element is already at its reading size (D155)
     // a still is held to part of the card before anything is measured, so one
     // tall photograph cannot become the whole reading (D102)
     back.style.setProperty('--piece-max', `${Math.round(maxH * PIECE_MAX_FRAC)}px`);
@@ -341,7 +360,7 @@ export function createView(field, { rig = false } = {}) {
     // the studio stands empty its name is written there, so the thread backs off
     // that name's own box rather than running through the letters.
     const B = thread.toPlace
-      ? placeBoxPx(thread.toPlace)
+      ? placeBoxPx(thread, state)
       : cardBoxPx(byId.get(thread.to) ?? {});
     if (!thread.toPlace && !byId.get(thread.to)) return null;
     const dx = B.cx - A.cx;
@@ -498,16 +517,24 @@ export function createView(field, { rig = false } = {}) {
   // reads beyond the card's own laid size.
   // How much a card grows when it comes into the hand: enough to read, never
   // wider than the light allows, never smaller than it lay (D100).
-  function flipGrow(el) {
-    const w = el.offsetWidth || 1;
-    const target = Math.max(READ_MIN, Math.min(READ_MAX, rect.w * READ_W_FRAC, rect.h * READ_H_FRAC));
-    return Math.max(1, target / w);
-  }
+  // The two sizes a card has, both computed rather than measured, so either can
+  // be known while the element is wearing the other.
+  const laidWidthPx = (card) => Math.max(CARD_W * card.scale * short(), FLOOR_W * card.scale);
+  const readWidthPx = (card) => Math.max(
+    laidWidthPx(card), // never smaller than it lay
+    READ_MIN, // …nor smaller than a column anyone would read
+    Math.min(READ_MAX, rect.w * READ_W_FRAC, rect.h * READ_H_FRAC),
+  );
+  // how far the element must be scaled to look like the other size, for the turn
+  const flipGrow = (card) => readWidthPx(card) / Math.max(1, laidWidthPx(card));
 
-  function flipPose(card, el) {
-    const grow = flipGrow(el);
-    const gw = el.offsetWidth * grow;
-    const gh = el.offsetHeight * grow;
+  // Where the open card sits so it stays in the light. `at` says which size the
+  // element is wearing while we ask: at its reading size the box is what it
+  // measures, at its laid size the open box is that box grown.
+  function flipPose(card, el, at = 'read') {
+    const by = at === 'read' ? 1 : flipGrow(card);
+    const gw = el.offsetWidth * by;
+    const gh = el.offsetHeight * by;
     const m = Math.max(10, short() * 0.02);
     const spread = spreadOf(card);
     const cx = card.x * rect.w;
@@ -520,16 +547,21 @@ export function createView(field, { rig = false } = {}) {
     };
   }
 
-  function flippedTransform(card, el) {
-    const pose = flipPose(card, el);
-    return `translate(calc(-50% + ${pose.dx.toFixed(1)}px), calc(-50% + ${pose.dy.toFixed(1)}px)) rotate(0deg) scale(${flipGrow(el).toFixed(3)})`;
+  // `at` is the size the element is actually wearing right now: a pose describes
+  // where the card looks, and the scale is only ever the difference between the
+  // two sizes — 1 whenever the element is already the size it should look.
+  function flippedTransform(card, el, at = 'read') {
+    const pose = flipPose(card, el, at);
+    const scale = at === 'read' ? 1 : flipGrow(card);
+    return `translate(calc(-50% + ${pose.dx.toFixed(1)}px), calc(-50% + ${pose.dy.toFixed(1)}px)) rotate(0deg) scale(${scale.toFixed(3)})`;
   }
 
   // Keyframes need matching transform-function lists, or interpolation falls
   // into matrix decomposition. The turn itself lives on the pivot alone.
-  const laidKeyframe = (card) => {
+  const laidKeyframe = (card, at = 'laid') => {
     const s = spreadOf(card);
-    return `translate(calc(-50% + ${(s?.dx ?? 0).toFixed(1)}px), calc(-50% + ${(s?.dy ?? 0).toFixed(1)}px)) rotate(${card.rot}deg) scale(1)`;
+    const scale = at === 'laid' ? 1 : 1 / flipGrow(card);
+    return `translate(calc(-50% + ${(s?.dx ?? 0).toFixed(1)}px), calc(-50% + ${(s?.dy ?? 0).toFixed(1)}px)) rotate(${card.rot}deg) scale(${scale.toFixed(3)})`;
   };
 
   async function turnCard(id, open, token) {
@@ -542,7 +574,11 @@ export function createView(field, { rig = false } = {}) {
     if (!open) stopExperience(id); // a card laid down goes quiet
     const pivot = el.querySelector('.card__pivot');
     const wasOpen = flippedId === id;
-    const fromPose = wasOpen ? flippedTransform(card, el) : laidKeyframe(card);
+    // the poses are read after settleCard has resized the element, so each is
+    // expressed against the size it is then wearing
+    const fromPose = wasOpen
+      ? () => flippedTransform(card, el, 'laid') // was open, element now laid
+      : () => laidKeyframe(card, 'read'); // was laid, element now at reading size
     const fromTurn = wasOpen ? 'rotateY(180deg)' : 'rotateY(0deg)';
     const fromOpacity = wasOpen ? 1 : card.opacity;
     flippedId = open ? id : null;
@@ -551,10 +587,10 @@ export function createView(field, { rig = false } = {}) {
     settleCard(el, card, z); // truth first; the turn is an overlay
     relayThreads(); // and the card in hand is the one whose threads speak
     if (!open) el.style.zIndex = 400; // stay lifted while turning back down
-    const toPose = open ? flippedTransform(card, el) : laidKeyframe(card);
+    const toPose = open ? flippedTransform(card, el, 'read') : laidKeyframe(card, 'laid');
     const anims = [
       track(el.animate(
-        [{ transform: fromPose, opacity: fromOpacity }, { transform: toPose, opacity: open ? 1 : card.opacity }],
+        [{ transform: fromPose(), opacity: fromOpacity }, { transform: toPose, opacity: open ? 1 : card.opacity }],
         { duration: FLIP_MS, easing: EASE },
       )),
     ];

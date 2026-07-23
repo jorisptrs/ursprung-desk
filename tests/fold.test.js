@@ -39,7 +39,7 @@ test('seed.json validates against the schema on append', () => {
 
 test('determinism: fold the seed twice at t = 0, mid-event, past-end — diff nothing', () => {
   const events = loadSeed();
-  const mid = (eventTime(0) + eventTime(1)) / 2;
+  const mid = (eventTime(1) + eventTime(2)) / 2;
   for (const t of [0, mid, pastEnd(events)]) {
     assert.equal(
       JSON.stringify(fold(events, t)),
@@ -53,9 +53,16 @@ test('arrival gating at boundary t values', () => {
   const events = loadSeed();
   const deposits = seed.events.filter((ev) => ev.e === 'deposit');
   const threads = seed.events.filter((ev) => ev.e === 'thread');
+  const first = seed.events.findIndex((ev) => ev.e === 'deposit'); // the roster comes before it (D152)
   assert.equal(fold(events, 0).cards.length, 0);
-  assert.equal(fold(events, eventTime(0)).cards.length, 1); // boundary is inclusive
-  assert.equal(fold(events, (eventTime(0) + eventTime(1)) / 2).cards.length, 1);
+  assert.equal(fold(events, eventTime(first)).cards.length, 1); // boundary is inclusive
+  assert.equal(fold(events, (eventTime(first) + eventTime(first + 1)) / 2).cards.length, 1);
+  // and the room is named on the first beat, before any card — that is what the
+  // roster is for: the curator registered everyone before anybody arrived
+  const opening = fold(events, eventTime(0));
+  assert.equal(opening.cards.length, 0, 'nothing has been laid yet');
+  assert.ok(opening.studios.length >= 9, 'and the room is already a room of named places');
+  assert.ok(opening.studios.every((s) => s.held === 0));
   const settled = fold(events, pastEnd(events));
   assert.equal(settled.cards.length, deposits.length);
   // a floating work is also held by its makers' studios, so the drawn threads
@@ -329,11 +336,28 @@ test('a stack that never stood before costs a small rearrangement, not a redraw'
     const after = fold(evs, pastEnd(evs));
     const shift = moved(before.places, after.places);
     assert.ok(shift > 0, `${first.artifact.id} started a stack and nothing budged for it`);
-    assert.ok(shift < 0.12, `the table was redrawn rather than nudged (${shift.toFixed(3)})`);
+    assert.ok(shift < 0.16, `the table was redrawn rather than nudged (${shift.toFixed(3)})`);
     for (const s of after.studios) {
       assert.ok(s.place[0] > 0.02 && s.place[0] < 0.98 && s.place[1] > 0.02 && s.place[1] < 0.98);
     }
   }
+});
+
+test('once a night has arranged the table, a newcomer barely disturbs it', () => {
+  // the loose bound above is what an un-arranged table costs, where the fold is
+  // solving the whole room itself. With an arrangement standing, every stack it
+  // names is held to the drift cap and only the newcomer really travels.
+  const base = [person('a-1', ['E.']), person('a-2', ['M.']), person('a-3', ['Y.'])];
+  const laid = fold(base, pastEnd(base));
+  const evs = [...base, { e: 'arrange', night: 1, places: laid.places }, person('a-4', ['N.'])];
+  const after = fold(evs, pastEnd(evs));
+  for (const name of ['E.', 'M.', 'Y.']) {
+    const was = laid.places[name];
+    const now = after.places[name];
+    assert.ok(Math.hypot(now[0] - was[0], now[1] - was[1]) <= 0.0701,
+      `${name} moved further than the night's drift allows`);
+  }
+  assert.ok(after.places['N.'], 'and the newcomer got a place of their own');
 });
 
 test('the same table folds to the same places however many times it is asked', () => {

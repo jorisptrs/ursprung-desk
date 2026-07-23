@@ -18,8 +18,8 @@ const MARGIN = 0.09; // piles keep clear of the light's edge
 // Each is a little more than the stack's own half-diagonal in canonical units —
 // a studio's pile measures about 0.104 corner to centre, a shared work's 0.079 —
 // so two stacks at arm's length have air between them rather than a shared edge.
-const REACH_STUDIO = 0.125;
-const REACH_SHARED = 0.095;
+const REACH_STUDIO = 0.137;
+const REACH_SHARED = 0.108;
 const APART = REACH_STUDIO * 2; // two studios, the old single distance
 const PULL = 0.035; // how hard a shared problem draws two studios together
 const PUSH = 0.05; // how hard any two stacks hold each other off

@@ -41,7 +41,9 @@ const FAILURES = [
 // all functions of the index — no clock, no randomness, so ?castle is the same
 // table every time and a screenshot of it can be compared with another.
 export const castleEvents = (() => {
-  const deposits = [];
+  // The curator registers the cohort before anyone arrives, so the table opens
+  // as a room of named empty places rather than a void that fills (D152).
+  const deposits = [{ e: 'roster', night: 0, people: [...PEOPLE] }];
   let n = 0;
   for (let night = 1; night <= 4; night++) {
     for (let i = 0; i < 25; i++) {
@@ -75,12 +77,13 @@ export const castleEvents = (() => {
   // a place between the hands for each work they made together.
   const shared = new Map();
   for (const d of deposits) {
+    if (d.e !== 'deposit') continue;
     const makers = [...new Set(d.artifact.people)].filter((n) => n !== 'Claude').sort();
     if (makers.length > 1) shared.set(makers.join(' + '), makers);
   }
   const places = arrange(
     [
-      ...new Set(deposits.flatMap((d) => d.artifact.people)),
+      ...new Set(deposits.filter((d) => d.e === 'deposit').flatMap((d) => d.artifact.people)),
       ...[...shared].map(([key, of]) => ({ key, of })),
     ],
     coauthorship(deposits),
