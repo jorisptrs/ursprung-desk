@@ -87,6 +87,10 @@ function remove(name) {
   const [gone] = people.splice(at, 1);
   writePeople(root, people);
   say(`${gone.name} · out of the cohort`);
+  // The registry is a list of who may claim a device; the table is a log, and a
+  // log is not rewritten (§9). So the name stays written on the wood where it
+  // was placed, with nothing standing in it — said plainly rather than found out.
+  say('  their place stays on the table; the log is not rewritten');
 }
 
 // One code, printed once, for the wall. The second, smaller code carries this

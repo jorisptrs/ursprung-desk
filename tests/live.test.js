@@ -151,3 +151,20 @@ test('stop() is final', async () => {
   await h.pickup.poll();
   assert.equal(h.stream.all().length, 0);
 });
+
+test('the reader carries every kind of fact, not only cards (D172)', async () => {
+  // the room server writes a roster when the curator registers someone and when
+  // a person renames themselves, so those lines reach the table this way too —
+  // a reader that only understood deposits would have dropped the room's names
+  const roster = `${JSON.stringify({ e: 'roster', night: 0, people: ['E.', 'M.'] })}\n`;
+  const arrange = `${JSON.stringify({ e: 'arrange', night: 1, places: { 'E.': [0.3, 0.3] } })}\n`;
+  const h = harness(roster + line('m-001') + arrange);
+  await h.pickup.poll();
+  assert.deepEqual(h.stream.all().map((e) => e.e), ['roster', 'deposit', 'arrange']);
+  assert.deepEqual(h.warned, [], 'and says nothing about any of it');
+
+  // a log read again from the top repeats its rosters; the fold dedupes by name,
+  // so a re-read is quiet rather than an error the reader has to explain
+  await h.pickup.poll();
+  assert.equal(h.warned.length, 0);
+});
