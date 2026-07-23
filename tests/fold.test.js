@@ -207,7 +207,9 @@ test('a castle-scale table: the map holds where the scatter collapsed', () => {
   for (let night = 1; night <= 4; night++) {
     for (let i = 0; i < 25; i++) {
       const who = people[(night * 7 + i * 3) % people.length];
-      const also = people[(night * 11 + i * 5) % people.length];
+      // people keep working with whoever they clicked with, so a pairing
+      // recurs rather than being drawn fresh every time
+      const also = people[(people.indexOf(who) * 7 + 3) % people.length];
       const shared = i % 4 === 0 && also !== who;
       evs.push(person(`c-${++n}`, shared ? [who, also] : [who], 'work', night));
     }
