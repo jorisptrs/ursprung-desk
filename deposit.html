@@ -9,11 +9,16 @@
 </head>
 <body class="deposit-body">
   <script type="module">
-    // The QR target (D79): the same sheet, standing alone. Its lays reach any
-    // table tab open in this browser; the castle's LAN store later stands
-    // behind the same sink.
-    import { openSheet, broadcastSink } from './js/deposit.js';
-    openSheet({ mode: 'page', container: document.body, sink: broadcastSink() });
+    // The QR target (D79): the same sheet, standing alone. Which desk it lays
+    // onto is decided by which desk served it. With a personal token this page
+    // came from the room's own server over the room's network, and the push
+    // goes to the room's log — the everyday door, made real. Without one this
+    // is the published renderer, which has no backend and never will: a push
+    // reaches a table tab in this same browser and nothing leaves the device.
+    import { openSheet, broadcastSink, httpSink } from './js/deposit.js';
+    const token = new URLSearchParams(location.search).get('t');
+    const sink = token ? httpSink(location.origin, token) : broadcastSink();
+    openSheet({ mode: 'page', container: document.body, sink });
   </script>
 </body>
 </html>

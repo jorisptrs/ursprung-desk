@@ -18,13 +18,23 @@ export function parseJsonl(text) {
 
 // A damaged or refused line is skipped with one dry warn and never retried —
 // transport damage is not a coerced deposit, and pickup never halts on it.
-// Three straight missing-file polls stop the poller for good (a hand-typed
-// ?live on a static host self-heals into silence).
+//
+// The table stands for four days in a room, so this reader recovers rather
+// than gives up: a desk that is briefly not answering — restarted, replugged,
+// off the wifi for a moment — must be picked up again when it returns, not
+// wait for someone to notice a dead tab. So a missing file backs off and keeps
+// asking, and a file that shrank (truncated between takes, or a fresh log) is
+// simply read again from the top.
+//
+// A duplicate id is the one refusal that is never damage here. The door
+// allocates ids from the log itself, so it cannot write one twice; a duplicate
+// only ever means this reader is passing over a card that is already on the
+// table, which is the outcome the line was asking for. It is skipped without a
+// word, and needs no state to know when to expect it.
 export function attachLivePickup(stream, {
   url = 'drop/stream.jsonl',
   intervalMs = 750,
   missIntervalMs = 5000,
-  maxMisses = 3,
   fetch: fetchImpl = null,
   warn = (msg) => console.warn(msg),
   setTimer = setTimeout,
@@ -32,7 +42,7 @@ export function attachLivePickup(stream, {
 } = {}) {
   const get = fetchImpl ?? ((u, o) => fetch(u, o));
   let seen = 0;
-  let misses = 0;
+  let quiet = false; // one word about a desk that went away, not one per poll
   let timer = null;
   let stopped = false;
 
@@ -43,12 +53,14 @@ export function attachLivePickup(stream, {
   }
 
   function missed(msg) {
-    misses += 1;
-    if (misses < maxMisses) return missIntervalMs;
-    warn(`desk: ${msg} — live pickup stopped`);
-    stop();
-    return null;
+    if (!quiet) {
+      quiet = true;
+      warn(`desk: ${msg} — still listening`);
+    }
+    return missIntervalMs;
   }
+
+  const duplicate = (err) => /duplicate id/.test(String(err?.message ?? err));
 
   async function poll() {
     if (stopped) return;
@@ -58,17 +70,17 @@ export function attachLivePickup(stream, {
       if (!res.ok) {
         delay = missed(`no ${url} (${res.status})`);
       } else {
-        misses = 0;
-        const { lines } = parseJsonl(await res.text());
-        if (lines.length < seen) { // rewritten between takes — this reader is done
-          warn(`desk: ${url} shrank — live pickup stopped`);
-          stop();
-          return;
+        if (quiet) {
+          quiet = false;
+          warn(`desk: ${url} is back`);
         }
+        const { lines } = parseJsonl(await res.text());
+        if (lines.length < seen) seen = 0; // a shorter log is a new log: read it again
         for (let i = seen; i < lines.length; i++) {
           try {
             stream.append(JSON.parse(lines[i]));
           } catch (err) {
+            if (duplicate(err)) continue; // already on the table; nothing to say
             warn(`desk: drop line ${i + 1} skipped — ${err?.message ?? err}`);
           }
         }

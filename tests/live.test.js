@@ -1,6 +1,7 @@
 // Live pickup (D105): the torn-tail rule and the reader's manners — skip a bad
-// line once, never halt, never retry; stop on a rewrite or a vanished file.
-// Dev-only.
+// line once, never halt, never retry; and recover rather than give up, because
+// the table stands in a room for four days and the desk it watches may
+// restart under it. Dev-only.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -75,10 +76,13 @@ test('a damaged or refused line is skipped once, warned once, and never retried'
   assert.match(h.warned[0], /skipped/);
   assert.deepEqual(h.stream.all().map((e) => e.artifact.id), ['m-001'], 'pickup never halts on one bad line');
 
-  h.state.body += line('m-001'); // a duplicate id: the stream refuses it
+  // a card the stream will not take: unsigned, and it says so
+  const unsigned = JSON.parse(JSON.stringify(card('m-002')));
+  delete unsigned.artifact.people;
+  h.state.body += `${JSON.stringify(unsigned)}\n`;
   await h.pickup.poll();
   assert.equal(h.warned.length, 2);
-  assert.match(h.warned[1], /duplicate id/);
+  assert.match(h.warned[1], /needs an author/);
 
   h.state.body += line('m-003');
   await h.pickup.poll();
@@ -86,44 +90,59 @@ test('a damaged or refused line is skipped once, warned once, and never retried'
   assert.equal(h.stream.all().length, 2);
 });
 
-test('a rewritten (shrunk) file stops the reader — the take was reset', async () => {
+test('a duplicate id is already on the table, not damage', async () => {
+  const h = harness(line('m-001'));
+  await h.pickup.poll();
+  h.state.body += line('m-001'); // the same card again
+  await h.pickup.poll();
+  assert.equal(h.stream.all().length, 1);
+  assert.equal(h.warned.length, 0, 'the card the line asked for is there — nothing to report');
+});
+
+test('a shrunk file is a new log: re-read from the top, and what is laid stays quiet', async () => {
   const h = harness(line('m-001') + line('m-002'));
   await h.pickup.poll();
   assert.equal(h.stream.all().length, 2);
-  h.state.body = '';
+
+  h.state.body = ''; // truncated between takes
   await h.pickup.poll();
-  assert.match(h.warned[0], /shrank/);
-  assert.ok(h.pickup.stopped());
-  const before = h.state.calls;
+  assert.ok(!h.pickup.stopped(), 'the table keeps listening — the desk may just have restarted');
+  assert.equal(h.pickup.seen(), 0, 'and it will read the next log from its first line');
+
+  // the same two cards come back, then a third: only the third is new
+  h.state.body = line('m-001') + line('m-002') + line('m-003');
   await h.pickup.poll();
-  assert.equal(h.state.calls, before, 'a stopped reader does not poll again');
+  assert.deepEqual(h.stream.all().map((e) => e.artifact.id), ['m-001', 'm-002', 'm-003']);
+  assert.equal(h.warned.length, 0, 'a card already on the table is not damage');
 });
 
-test('three straight misses stop the reader; any read resets the count', async () => {
+test('a desk that goes away is waited for, and says so once', async () => {
   const h = harness('', { ok: false, status: 404 });
-  await h.pickup.poll();
-  await h.pickup.poll();
-  assert.ok(!h.pickup.stopped(), 'two misses are patience');
-  assert.equal(h.timers.at(-1).ms, 5000, 'and it backs off while missing');
+  for (let i = 0; i < 5; i++) await h.pickup.poll();
+  assert.ok(!h.pickup.stopped(), 'a missing desk is never given up on');
+  assert.equal(h.timers.at(-1).ms, 5000, 'it backs off while missing');
+  assert.equal(h.warned.length, 1, 'one word, not one per poll');
+  assert.match(h.warned[0], /still listening/);
+
   h.state.ok = true;
   h.state.body = line('m-001');
   await h.pickup.poll();
   assert.equal(h.timers.at(-1).ms, 750, 'a read restores the tempo');
-
-  h.state.ok = false;
-  for (let i = 0; i < 3; i++) await h.pickup.poll();
-  assert.ok(h.pickup.stopped());
-  assert.match(h.warned.at(-1), /live pickup stopped/);
+  assert.match(h.warned.at(-1), /is back/);
+  assert.deepEqual(h.stream.all().map((e) => e.artifact.id), ['m-001']);
 });
 
-test('a fetch that throws counts as a miss, not a crash', async () => {
+test('a fetch that throws is waited out too, not a crash', async () => {
   const h = harness(line('m-001'));
   h.state.fail = 'network down';
   await h.pickup.poll();
   await h.pickup.poll();
-  await h.pickup.poll();
-  assert.ok(h.pickup.stopped());
+  assert.ok(!h.pickup.stopped());
   assert.match(h.warned.at(-1), /cannot read/);
+
+  h.state.fail = null;
+  await h.pickup.poll();
+  assert.deepEqual(h.stream.all().map((e) => e.artifact.id), ['m-001'], 'it picks up where it left off');
 });
 
 test('stop() is final', async () => {
