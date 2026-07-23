@@ -219,6 +219,36 @@ async function main() {
   await sleep(900);
   ok((await geom()).find((c) => c.id === pick.id).z >= 300, 'and it comes back to the pile again');
 
+  // The wood steps back one thing at a time (D174): with a card in hand, the
+  // first tap lays it down and leaves the pile spread; only the next shuts it.
+  const nowAt = (await geom()).find((c) => c.id === pick.id); // it was laid back down above
+  await click(nowAt.x + nowAt.w / 2, nowAt.y + nowAt.h / 2); // pick it up again
+  await sleep(900);
+  ok((await geom()).find((c) => c.id === pick.id).w > pick.w * 1.4, 'a card is in hand again');
+  const away = await evalIn(`(() => {
+    const f = document.getElementById('field');
+    const r = f.getBoundingClientRect();
+    for (let y = r.top + 8; y < r.bottom - 8; y += 7) {
+      for (let x = r.left + 8; x < r.right - 8; x += 7) {
+        const el = document.elementFromPoint(x, y);
+        if (el && f.contains(el) && !el.closest('.card') && !el.closest('button')) return { x, y };
+      }
+    }
+    return null;
+  })()`);
+  await click(away.x, away.y);
+  await sleep(900);
+  const laid = (await geom()).find((c) => c.id === pick.id);
+  ok(Math.abs(laid.w - pick.w) < 2, 'a tap on the wood laid the card down');
+  ok(await evalIn("document.querySelectorAll('.card[data-lit]').length > 1"),
+    'and left its pile open, where it was being read from');
+
+  // and the help goes away when you look elsewhere (D174)
+  await evalIn(`document.querySelector('.keys-btn').click()`);
+  ok(await evalIn(`document.querySelector('.keys').classList.contains('open')`), 'the ? opens');
+  await click(away.x, away.y);
+  ok(!(await evalIn(`document.querySelector('.keys').classList.contains('open')`)), 'and a tap anywhere else shuts it');
+
   // and the wood puts everything back — a point inside the light with nothing on it
   const wood = await evalIn(`(() => {
     const f = document.getElementById('field');
