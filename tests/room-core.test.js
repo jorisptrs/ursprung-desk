@@ -307,7 +307,8 @@ test('the signature makes the card yours, and replacing it hands it over', () =>
   // and both may stand — adding is just typing another
   const both = composeArtifact({ blocks: [{ id: 't1', t: 'text', text: 'the zither, restrung\n\n@E. @Y.' }] });
   assert.deepEqual(both.artifact.people, ['E.', 'Y.']);
-  assert.equal(both.artifact.caption, 'E. + Y.', 'and the front says who, in order');
+  assert.equal(both.artifact.caption, undefined, 'the makers travel in people; the face writes them itself (D148)');
+  assert.equal(both.artifact.excerpt.text, 'the zither, restrung', 'and the signature is not also prose');
 
   const laid = depositHand({ ...both.artifact, title: 'the zither, restrung' }, {}, { root, author: 'E.' });
   assert.deepEqual(laid.event.artifact.people, ['E.', 'Y.']);

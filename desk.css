@@ -100,11 +100,6 @@ html.rig, html.rig body { cursor: none; }
   will-change: transform, opacity; /* stay composited: no AA snap when motion starts */
 }
 
-/* A pile spread open under a hand. The transition lives only while the flag
-   stands, so an arriving card still lands where it will lie forever (D87) —
-   this is a gesture's motion, not the table's. */
-[data-opening] .card { transition: transform 240ms cubic-bezier(0.22, 0.9, 0.3, 1); }
-
 /* Something is in hand: the rest of the table steps back so the read is the lit
    thing. Brightness, not opacity — opacity is already how the table says age. */
 .card, .studio { transition: filter 220ms ease; }

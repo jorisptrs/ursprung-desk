@@ -9,7 +9,7 @@ import {
   siteCardSvg, linkExcerpt, normalizeUrl, stripExt, slashTokenAt, refLineChange,
   classifyLine, parseDoc, composeDoc, migrateSheet, extractTitle, resolveFront,
   composeArtifact, validateArtifact, allocate, materialize, directSink, pageMeta,
-  hasTitleLine, doorRefusal, deckSpread,
+  hasTitleLine, doorRefusal, deckSpread, withoutSignature,
 } from '../js/deposit.js';
 import { createStream } from '../js/stream.js';
 
@@ -232,7 +232,8 @@ test('composeDoc (D96): the whole page → the artifact, everything downstream u
       });
   assert.equal(artifact.media, 'audio');
   assert.equal(artifact.title, 'drone, phone take');
-  assert.equal(artifact.caption, 'B. + Claude');
+  assert.equal(artifact.caption, undefined, 'the makers travel in people; the face writes them (D148)');
+  assert.deepEqual(artifact.people, ['B.', 'Claude']);
   assert.deepEqual(artifact.detail.experience, { mode: 'play', src: null });
   assert.equal(blobs.experience, 'AUD');
   assert.equal(blobs[blobKeys.get('au1')], 'AUD', 'blob slots reachable through the piece id');
@@ -321,7 +322,7 @@ test('composeArtifact: the editor is the back — order kept, blobs slotted, aut
   assert.equal(artifact.media, 'image');
   assert.equal(artifact.title, 'the kiln door');
   assert.deepEqual(artifact.people, ['T.', 'Claude']);
-  assert.equal(artifact.caption, 'T. + Claude', 'the author is always on the front');
+  assert.equal(artifact.caption, undefined, 'the makers travel in people; the face writes them (D148)');
   assert.deepEqual(artifact.detail.composition.map((e) => e.t), ['text', 'image', 'text', 'file'], 'the arrangement holds');
   assert.equal(artifact.detail.composition[1].src, null, 'the back image is the original, riding as a blob');
   assert.equal(blobs['piece:1'], 'IMG');
@@ -409,4 +410,21 @@ test('directSink: allocates, appends, and lets the stream refuse (D85)', () => {
   assert.throws(() => sink.deposit({ ...bare, title: '', caption: undefined, excerpt: { form: 'words' } }, {}),
     /a card needs a title, a caption, or a line of its own/, 'rejected, never coerced');
   assert.equal(s.all().length, 3, 'a refused deposit leaves no trace');
+});
+
+test('a signature is names, not prose — it is read and then it goes (D160)', () => {
+  // the pre-filled name sits at the foot of the same block the writing is in
+  // (D137), so stripping whole blocks would have left it standing
+  assert.equal(withoutSignature('the zither, restrung\n\n@E.'), 'the zither, restrung');
+  assert.equal(withoutSignature('@E. @Y.'), '', 'a page holding nothing but its signature says nothing');
+  assert.equal(withoutSignature('@E.\nthe zither, restrung'), 'the zither, restrung', 'wherever it stands');
+  // a name inside a sentence is part of the sentence and stays
+  assert.equal(withoutSignature('the third course held tune, @Y. showed me the trick'),
+    'the third course held tune, @Y. showed me the trick');
+  assert.equal(withoutSignature(''), '');
+
+  const { artifact } = composeArtifact({ blocks: [{ id: 't1', t: 'text', text: 'the zither, restrung\n\n@E. @Y.' }] });
+  assert.deepEqual(artifact.people, ['E.', 'Y.'], 'the names were read before the line went');
+  assert.equal(artifact.excerpt.text, 'the zither, restrung', 'and the face says them once, on its own line');
+  assert.equal(artifact.caption, undefined);
 });

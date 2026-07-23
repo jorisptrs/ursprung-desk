@@ -41,7 +41,6 @@ export function createView(field, { rig = false } = {}) {
   let openPage = 0; // which leaf of the open card's back is showing (D100)
   let openLeaves = [0]; // where each leaf begins, in the open back's own pixels
   let openPile = null; // which studio's pile is spread open — view-ephemera too
-  let motionTimer = null;
 
   const layer = document.createElement('div');
   layer.className = 'threads';
@@ -90,7 +89,9 @@ export function createView(field, { rig = false } = {}) {
         const { w, h } = cardSizePx(c);
         return { w: el?.offsetWidth || w, h: el?.offsetHeight || h };
       });
-      const pack = packSpread(sizes, gap);
+      // wide rows, because a studio opened is a sequence to follow along: the
+      // oldest at the top left, the newest at the end (D161)
+      const pack = packSpread(sizes, gap, rect.w * 0.8);
       // the studio's own place is the middle of its stack (fold.js), so the
       // spread opens around the same point the pile stood on
       const [cx, cy] = [group[0].x * rect.w, group[0].y * rect.h];
@@ -113,14 +114,60 @@ export function createView(field, { rig = false } = {}) {
     return spreadPlan()?.get(card.id) ?? null;
   }
 
-  // The one motion the table allows itself besides the flip, and only under a
-  // hand: while this flag stands, a card's move is a move (desk.css). Arrivals
-  // never carry it, so a card still appears where it will lie forever (D87).
-  function markMotion() {
-    spreadCache = null; // measured from the laid cards; they are about to change
-    field.dataset.opening = '';
-    clearTimeout(motionTimer);
-    motionTimer = setTimeout(() => { delete field.dataset.opening; }, 320);
+  // ---- a move is a move, not a jump (D162) ----
+  //
+  // D87 said placements are instant, and that stands: a card ARRIVES where it
+  // will lie forever, because a table that performs on arrival is a screen. But
+  // a card that is already lying somewhere and ends up somewhere else has
+  // *moved*, and a jump reads as a glitch rather than as a change — which
+  // matters most in the replay, where the whole point is watching the cohort
+  // find each other. So: arrivals snap, moves travel.
+  //
+  // Measured from the rendered box rather than from the model, so it catches
+  // every kind of move at once — a pile opening, a pile closing, a night's
+  // rearrangement — and the settled style is always the truth underneath. The
+  // element is put back where it was with a transform and animated to nothing,
+  // so nothing but the compositor is asked to work.
+  const MOVE_MS = 620;
+  let boxesBefore = null;
+  let instant = false; // the still surfaces never travel (D62)
+
+  // Whether anything has been rearranged, asked of the fold's own places rather
+  // than of the DOM: reading a hundred boxes to find out that nothing moved
+  // would force a layout on every event of the pass.
+  function placesMoved(was, now) {
+    const a = was?.places;
+    const b = now?.places;
+    if (!a || !b) return false;
+    for (const key of Object.keys(b)) {
+      const p = a[key];
+      if (p && Math.hypot(p[0] - b[key][0], p[1] - b[key][1]) > 0.001) return true;
+    }
+    return false;
+  }
+
+  function watchMoves() {
+    boxesBefore = new Map();
+    for (const [id, el] of cardEls) boxesBefore.set(id, el.getBoundingClientRect());
+  }
+
+  function playMoves() {
+    const before = boxesBefore;
+    boxesBefore = null;
+    if (!before || rig) return;
+    for (const [id, el] of cardEls) {
+      const was = before.get(id);
+      if (!was) continue; // it was not on the table a moment ago: an arrival, which snaps
+      const now = el.getBoundingClientRect();
+      const dx = was.left - now.left;
+      const dy = was.top - now.top;
+      if (Math.hypot(dx, dy) < 1.5) continue;
+      const settled = el.style.transform || 'none';
+      track(el.animate(
+        [{ transform: `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) ${settled}` }, { transform: settled }],
+        { duration: MOVE_MS, easing: EASE },
+      ));
+    }
   }
 
   // What a thread must stop short of at a studio's place: the pile standing
@@ -406,7 +453,9 @@ export function createView(field, { rig = false } = {}) {
   // ---- reconcile ----
 
   function reconcile(state) {
+    if (!instant && boxesBefore === null && placesMoved(lastState, state)) watchMoves();
     const seenCards = new Set();
+    const moving = boxesBefore !== null;
     state.cards.forEach((card, i) => {
       let el = cardEls.get(card.id);
       if (!el) {
@@ -471,9 +520,15 @@ export function createView(field, { rig = false } = {}) {
     // two meanings on one channel is how a legend gets invented.
     field.toggleAttribute('data-reading', flippedId != null || openPile != null);
     lastState = state;
+    if (moving) playMoves();
   }
 
   function renderInstant(state) {
+    instant = true;
+    try { return renderStill(state); } finally { instant = false; }
+  }
+
+  function renderStill(state) {
     cancelActive();
     reconcile(state);
   }
@@ -605,7 +660,9 @@ export function createView(field, { rig = false } = {}) {
       sleep(FLIP_MS + SETTLE_GRACE_MS),
       token.aborted,
     ]);
-    if (!open && flippedId !== id) el.style.zIndex = z; // laid again, back into the pile
+    // laid again — back into the pile, which is still above the table while it
+    // is open, or the card sinks under the studios beside it
+    if (!open && flippedId !== id) settleCard(el, card, z);
   }
 
   // One queue job (D13): a swap is one exchange — the open card starts down,
@@ -761,13 +818,14 @@ export function createView(field, { rig = false } = {}) {
     const next = group.length > 1 ? key : null;
     if (next === openPile) return false;
     openPile = next;
+    spreadCache = null; // measured from the laid cards; they are about to change
+    watchMoves(); // opening or shutting a pile is a move, and reads as one
     if (flippedId != null) { // one thing in hand at a time: the card goes back down
       stopExperience(flippedId);
       const was = cardEls.get(flippedId);
       if (was) closeBack(was); // give the grown height back before the pack measures
       flippedId = null;
     }
-    markMotion();
     reconcile(lastState);
     return next != null;
   }
