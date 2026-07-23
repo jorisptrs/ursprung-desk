@@ -16,9 +16,30 @@
     // is the published renderer, which has no backend and never will: a push
     // reaches a table tab in this same browser and nothing leaves the device.
     import { openSheet, broadcastSink, httpSink } from './js/deposit.js';
-    const token = new URLSearchParams(location.search).get('t');
+
+    // The QR carries the token once; the phone keeps it, so coming back to the
+    // desk later is not another trip to a printed slip of paper. Possession is
+    // identity here as it is in the tray — the token IS the person.
+    const KEY = 'desk-room-token';
+    const fromQr = new URLSearchParams(location.search).get('t');
+    if (fromQr) { try { localStorage.setItem(KEY, fromQr); } catch { /* private mode: the URL still holds it */ } }
+    let token = fromQr;
+    if (!token) { try { token = localStorage.getItem(KEY); } catch { token = null; } }
+
+    // Who the desk is holding, and who else it knows — so the page opens
+    // already signed and an @ can offer the room. A desk that will not say
+    // (no token, or the published renderer) simply leaves both empty.
+    let me = null;
+    let people = [];
+    if (token) {
+      try {
+        const res = await fetch(`${location.origin}/whoami`, { headers: { 'x-desk-token': token }, cache: 'no-store' });
+        if (res.ok) ({ name: me, people } = await res.json());
+      } catch { /* the room is not answering; the sheet still writes */ }
+    }
+
     const sink = token ? httpSink(location.origin, token) : broadcastSink();
-    openSheet({ mode: 'page', container: document.body, sink });
+    openSheet({ mode: 'page', container: document.body, sink, me, people });
   </script>
 </body>
 </html>

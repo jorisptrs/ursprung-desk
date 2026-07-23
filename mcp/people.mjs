@@ -59,6 +59,13 @@ function add(name) {
   people[token] = { name: name.trim(), added: new Date().toISOString() };
   write(people);
   say(`${name.trim()} · registered`);
+  // A card writes a person as @name in its text, and a mention stops at the
+  // first space — so "Joris Peters" would sign as @Joris on a phone while the
+  // session door carried the whole name, and the log would hold one person
+  // under two names. Said here, at the one moment it can still be changed.
+  if (/\s/.test(name.trim())) {
+    say(`  note     a card signs this @${name.trim().split(/\s+/)[0]} — a name stops at the first space. Initials are the house style.`);
+  }
   say(`  phone    ${handDoor('desk.local', token)}`);
   say(`  session  claude mcp add desk --transport http ${sessionDoor('desk.local', token)}`);
 }

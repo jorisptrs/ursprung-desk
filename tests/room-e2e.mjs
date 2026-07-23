@@ -160,8 +160,18 @@ try {
   await evalIn(phone, UNTIL);
   ok(await evalIn(phone, 'edReady()', true), 'the QR opens the sheet on the phone');
 
-  // write a card the way a person does — an @name is the author (D88)
-  await evalIn(phone, "writeCard('# the zither, restrung\\n\\nthe third course held tune. @Y.')");
+  // the page opens already signed: the card is E.'s before a word is written
+  const opening = await evalIn(phone, '__view.state.doc.toString()');
+  ok(opening.trim() === '@E.', `the page opens signed (${JSON.stringify(opening)})`);
+  const preSigned = await evalIn(phone, 'document.querySelector(".sheet__face .card__caption")?.textContent ?? ""');
+  ok(preSigned === 'E.', `and the front already says whose it is (${preSigned || 'nothing'})`);
+  ok(await evalIn(phone, "!!document.querySelector('.sheet__action')"), 'the actions stand');
+  await evalIn(phone, "act('push to table')");
+  await sleep(600);
+  ok(/first/.test(await evalIn(phone, 'sheetStatus()')), 'but a page holding only its signature is not a card yet');
+
+  // write a card the way a person does, keeping the signature it opened with
+  await evalIn(phone, "writeCard('# the zither, restrung\\n\\nthe third course held tune.\\n\\n@E.')");
   await sleep(500);
   await shoot(phone, '2-phone');
 
@@ -182,6 +192,7 @@ try {
   const laidCard = log.length ? JSON.parse(log[0]).artifact : null;
   ok(laidCard?.id === 'h-001', `it is h-001, numbered by the hand door (${laidCard?.id})`);
   ok(laidCard?.provenance === 'hand', 'and the door named itself');
+  ok(JSON.stringify(laidCard?.people) === '["E."]', `signed by the person who wrote it (${JSON.stringify(laidCard?.people)})`);
   ok(!log[0]?.includes('data:'), 'with no payload written into the line');
 
   const arrived = await evalIn(table, 'until(() => card("h-001"), 12000)', true);
@@ -191,7 +202,19 @@ try {
   const total = await evalIn(table, 'laid()');
   ok(total === seeded + 1, `the table gained exactly one card (${seeded} → ${total})`);
 
-  // -- a card nobody signed is refused, and the person keeps it --
+  // -- the next page opens signed too, not only the first --
+  ok((await evalIn(phone, '__view.state.doc.toString()')).trim() === '@E.', 'the page after a push opens signed as well');
+
+  // -- the signature can be handed over: delete it, name someone else --
+  await evalIn(phone, "writeCard('# the fold, closed\\n\\n@Y.')");
+  await sleep(400);
+  await evalIn(phone, "act('push to table')");
+  await sleep(1500);
+  const handed = readFileSync(join(desk, 'drop', 'stream.jsonl'), 'utf8').split('\n').filter(Boolean);
+  const second = handed.length > 1 ? JSON.parse(handed[1]).artifact : null;
+  ok(JSON.stringify(second?.people) === '["Y."]', `replacing the signature hands the card over (${JSON.stringify(second?.people)})`);
+
+  // -- a card nobody signed at all is still refused --
   await evalIn(phone, "writeCard('# a fold that will not close')");
   await sleep(400);
   await evalIn(phone, "act('push to table')");
@@ -199,7 +222,7 @@ try {
   const refusal = await evalIn(phone, 'sheetStatus()');
   ok(/author/i.test(refusal), `an unsigned card is refused in words (${refusal || 'nothing said'})`);
   const after = readFileSync(join(desk, 'drop', 'stream.jsonl'), 'utf8').split('\n').filter(Boolean);
-  ok(after.length === 1, 'and the room’s log is unchanged');
+  ok(after.length === 2, 'and the room’s log is unchanged by it');
 
   const noise = [...table.noise, ...phone.noise].filter((n) => !/favicon|ERR_FILE/i.test(n));
   ok(noise.length === 0, `consoles clean${noise.length ? ` — ${noise.join(' | ')}` : ''}`);

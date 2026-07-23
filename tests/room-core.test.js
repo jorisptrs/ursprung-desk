@@ -12,7 +12,8 @@ import {
   depositHand, createDeskSink, planPayloads, blobExt, dataUrlParts, bytesToFile,
   dropFileIn, assetDirIn,
 } from '../mcp/core.mjs';
-import { whoIs, knownHosts, sameOrigin, decodeBlobs, peopleFileIn, readPeople } from '../mcp/room.mjs';
+import { whoIs, knownHosts, sameOrigin, decodeBlobs, peopleFileIn, readPeople, roster } from '../mcp/room.mjs';
+import { signedPage, onlySignature, composeArtifact } from '../js/deposit.js';
 
 const SEED = {
   events: [
@@ -207,6 +208,47 @@ test('a write from somewhere else is not a write from here', () => {
   assert.equal(at({ host: 'desk.local:8080', origin: 'http://desk.local:8080' }), true);
   assert.equal(at({ host: 'desk.local:8080', origin: 'https://evil.test' }), false);
   assert.equal(at({ host: 'desk.local:8080', origin: 'null' }), false, 'a sandboxed frame is not the desk');
+});
+
+// ---- the page opens signed ----
+
+test('a page opens with its own signature, and the signature alone is not a card', () => {
+  assert.equal(signedPage('E.'), '\n\n@E.', 'the name sits at the foot, the pen waits above it');
+  assert.equal(signedPage('  M.  '), '\n\n@M.');
+  assert.equal(signedPage(null), '', 'a desk that cannot say who is holding the sheet opens it blank');
+  assert.equal(signedPage('   '), '');
+
+  assert.equal(onlySignature('\n\n@E.', 'E.'), true);
+  assert.equal(onlySignature('@E.', 'E.'), true);
+  assert.equal(onlySignature('# the zither\n\n@E.', 'E.'), false, 'a card with words is a card');
+  assert.equal(onlySignature('\n\n@Y.', 'E.'), false, 'someone else’s name is a statement, not a default');
+  assert.equal(onlySignature('', null), false);
+});
+
+test('the signature makes the card yours, and replacing it hands it over', () => {
+  const { root } = fixture();
+  // as the sheet composes it: the pre-filled name is just text, and mentions are people
+  const mine = composeArtifact({ blocks: [{ id: 't1', t: 'text', text: 'the zither, restrung\n\n@E.' }] });
+  assert.deepEqual(mine.artifact.people, ['E.']);
+
+  // the depositor deletes their own name and writes another: the card is theirs
+  const theirs = composeArtifact({ blocks: [{ id: 't1', t: 'text', text: 'the zither, restrung\n\n@Y.' }] });
+  assert.deepEqual(theirs.artifact.people, ['Y.'], 'a deliberate edit, not a silence');
+
+  // and both may stand — adding is just typing another
+  const both = composeArtifact({ blocks: [{ id: 't1', t: 'text', text: 'the zither, restrung\n\n@E. @Y.' }] });
+  assert.deepEqual(both.artifact.people, ['E.', 'Y.']);
+  assert.equal(both.artifact.caption, 'E. + Y.', 'and the front says who, in order');
+
+  const laid = depositHand({ ...both.artifact, title: 'the zither, restrung' }, {}, { root, author: 'E.' });
+  assert.deepEqual(laid.event.artifact.people, ['E.', 'Y.']);
+});
+
+test('the roster is names, in order, and never a token', () => {
+  const { root } = fixture({ people: { t1: { name: 'E.' }, t2: { name: 'M.' }, t3: 'B.', t4: { name: 'E.' } } });
+  assert.deepEqual(roster(root), ['E.', 'M.', 'B.'], 'one entry per name, registration order');
+  assert.equal(JSON.stringify(roster(root)).includes('t1'), false, 'the way in is not a fact about anyone');
+  assert.deepEqual(roster(mkdtempSync(join(tmpdir(), 'empty-'))), []);
 });
 
 test('blobs over the wire are decoded, bounded, and never silently empty', () => {
