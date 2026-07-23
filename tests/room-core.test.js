@@ -12,8 +12,11 @@ import {
   depositHand, createDeskSink, planPayloads, blobExt, dataUrlParts, bytesToFile,
   dropFileIn, assetDirIn,
 } from '../mcp/core.mjs';
-import { whoIs, knownHosts, sameOrigin, decodeBlobs, peopleFileIn, readPeople, roster } from '../mcp/room.mjs';
-import { signedPage, onlySignature, composeArtifact } from '../js/deposit.js';
+import {
+  whoIs, knownHosts, sameOrigin, decodeBlobs, peopleFileIn, readPeople, writePeople,
+  roster, claim, rename, sameName,
+} from '../mcp/room.mjs';
+import { signedPage, onlySignature, composeArtifact, parseMentions } from '../js/deposit.js';
 
 const SEED = {
   events: [
@@ -22,11 +25,11 @@ const SEED = {
 };
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6360000002000100ffff03000006000557bfabd40000000049454e44ae426082', 'hex');
 
-function fixture({ people = { tok: { name: 'E.' } } } = {}) {
+function fixture({ people = [{ name: 'E.', tokens: ['tok'] }] } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'desk-room-'));
   writeFileSync(join(root, 'seed.json'), JSON.stringify(SEED));
   mkdirSync(join(root, 'drop'), { recursive: true });
-  writeFileSync(peopleFileIn(root), JSON.stringify(people));
+  writePeople(root, people);
   return { root };
 }
 
@@ -174,10 +177,10 @@ test('an uploaded name cannot climb out of its own directory', () => {
 
 // ---- who the room lets write ----
 
-test('a token is a person; anything else is nobody', () => {
-  const { root } = fixture({ people: { tok: { name: 'E.' }, old: 'M.' } });
+test('a device token is a person; anything else is nobody', () => {
+  const { root } = fixture({ people: [{ name: 'E.', tokens: ['tok', 'laptop'] }, { name: 'M.', tokens: [] }] });
   assert.deepEqual(whoIs(root, 'tok'), { token: 'tok', name: 'E.' });
-  assert.deepEqual(whoIs(root, 'old'), { token: 'old', name: 'M.' }, 'a bare name is still a name');
+  assert.deepEqual(whoIs(root, 'laptop'), { token: 'laptop', name: 'E.' }, 'a phone and a laptop are one person');
   assert.equal(whoIs(root, 'nope'), null);
   assert.equal(whoIs(root, ''), null);
   assert.equal(whoIs(root, undefined), null);
@@ -186,12 +189,78 @@ test('a token is a person; anything else is nobody', () => {
 
 test('a registry that is missing or damaged means nobody, not everybody', () => {
   const root = mkdtempSync(join(tmpdir(), 'desk-room-'));
-  assert.deepEqual(readPeople(root), {}, 'no file: nobody');
+  assert.deepEqual(readPeople(root), [], 'no file: nobody');
   mkdirSync(join(root, 'drop'), { recursive: true });
   writeFileSync(peopleFileIn(root), '{ not json');
-  assert.deepEqual(readPeople(root), {}, 'damaged: still nobody');
+  assert.deepEqual(readPeople(root), [], 'damaged: still nobody');
   writeFileSync(peopleFileIn(root), '["E."]');
-  assert.deepEqual(readPeople(root), {}, 'a list is not a registry');
+  assert.deepEqual(readPeople(root), [], 'a bare list is not a cohort');
+});
+
+// ---- claiming a name, and changing it ----
+
+test('tapping your own name mints this device a token; another device gets its own', () => {
+  const { root } = fixture({ people: [{ name: 'E.', tokens: [] }, { name: 'M.', tokens: [] }] });
+  const phone = claim(root, 'E.');
+  assert.equal(phone.name, 'E.');
+  assert.match(phone.token, /^[\w-]{10,}$/);
+  assert.deepEqual(whoIs(root, phone.token), { token: phone.token, name: 'E.' });
+
+  const laptop = claim(root, 'E.');
+  assert.notEqual(laptop.token, phone.token, 'a second device is a second way in');
+  assert.equal(whoIs(root, phone.token).name, 'E.', 'and the first still works');
+  assert.equal(readPeople(root).find((p) => p.name === 'E.').tokens.length, 2);
+});
+
+test('a name that is not in the cohort cannot be claimed', () => {
+  const { root } = fixture({ people: [{ name: 'E.', tokens: [] }] });
+  assert.match(claim(root, 'a stranger').refused, /not in this room/);
+  assert.match(claim(root, '').refused, /not in this room/);
+  assert.equal(readPeople(root)[0].tokens.length, 0);
+});
+
+test('a claim is case-insensitive about the name, and keeps the cohort’s spelling', () => {
+  const { root } = fixture({ people: [{ name: 'E.', tokens: [] }] });
+  assert.equal(claim(root, 'e.').name, 'E.', 'the name is the cohort’s, not the tap’s');
+  assert.equal(sameName(' E. ', 'e.'), true);
+  assert.equal(sameName('E.', 'M.'), false);
+});
+
+test('renaming binds what comes after, and no two people answer to one name', () => {
+  const { root } = fixture({ people: [{ name: 'E.', tokens: [] }, { name: 'M.', tokens: [] }] });
+  const { token } = claim(root, 'E.');
+
+  // a card laid under the old name keeps it — the log is never rewritten
+  depositHand({ ...sheetCard(), people: undefined }, {}, { root, author: 'E.' });
+  assert.deepEqual(JSON.parse(lines(root)[0]).artifact.people, ['E.']);
+
+  const taken = rename(root, token, 'M.');
+  assert.match(taken.refused, /already someone here/);
+  assert.equal(whoIs(root, token).name, 'E.', 'and nothing moved');
+
+  const done = rename(root, token, 'Emma Fell');
+  assert.deepEqual({ name: done.name, was: done.was }, { name: 'Emma Fell', was: 'E.' });
+  assert.equal(whoIs(root, token).name, 'Emma Fell', 'the device follows the person');
+  assert.deepEqual(roster(root), ['Emma Fell', 'M.']);
+  assert.deepEqual(JSON.parse(lines(root)[0]).artifact.people, ['E.'], 'the card already laid is untouched');
+
+  assert.match(rename(root, 'not-a-token', 'X.').refused, /does not know that device/);
+  assert.match(rename(root, token, '   ').refused, /a name/);
+});
+
+// ---- a name may hold spaces, once the room knows it ----
+
+test('a name the room knows is read whole; everyone else parses in one word', () => {
+  const roomKnows = ['Joris Peters', 'E.', 'Ana'];
+  assert.deepEqual(parseMentions('made with @Joris Peters and @E.', roomKnows), ['Joris Peters', 'E.']);
+  assert.deepEqual(parseMentions('made with @Joris Peters', []), ['Joris'], 'unknown to the room: the old rule');
+  assert.deepEqual(parseMentions('@Joris alone', roomKnows), ['Joris'], 'a shorter spelling is still a name');
+  assert.deepEqual(parseMentions('@Anastasia', roomKnows), ['Anastasia'], '@Ana must not swallow a longer name');
+  assert.deepEqual(parseMentions('@Ana.', roomKnows), ['Ana'], 'a full stop ends it');
+  // the longer of two overlapping names wins
+  assert.deepEqual(parseMentions('@Joris Peters', ['Joris', 'Joris Peters']), ['Joris Peters']);
+  // and the old behaviour is untouched where no room is given
+  assert.deepEqual(parseMentions(['with @E. and @Claude', 'again @Claude, then @R.']), ['E.', 'Claude', 'R.']);
 });
 
 test('the desk answers to its own name and its own addresses, and no other', () => {
@@ -245,9 +314,9 @@ test('the signature makes the card yours, and replacing it hands it over', () =>
 });
 
 test('the roster is names, in order, and never a token', () => {
-  const { root } = fixture({ people: { t1: { name: 'E.' }, t2: { name: 'M.' }, t3: 'B.', t4: { name: 'E.' } } });
-  assert.deepEqual(roster(root), ['E.', 'M.', 'B.'], 'one entry per name, registration order');
-  assert.equal(JSON.stringify(roster(root)).includes('t1'), false, 'the way in is not a fact about anyone');
+  const { root } = fixture({ people: [{ name: 'E.', tokens: ['t1'] }, { name: 'M.', tokens: [] }, { name: 'B.', tokens: ['t3'] }] });
+  assert.deepEqual(roster(root), ['E.', 'M.', 'B.'], 'the cohort, in the order it was seeded');
+  assert.equal(JSON.stringify(roster(root)).includes('t1'), false, 'a way in is not a fact about anyone');
   assert.deepEqual(roster(mkdtempSync(join(tmpdir(), 'empty-'))), []);
 });
 

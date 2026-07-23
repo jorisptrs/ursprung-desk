@@ -10,36 +10,79 @@
 <body class="deposit-body">
   <script type="module">
     // The QR target (D79): the same sheet, standing alone. Which desk it lays
-    // onto is decided by which desk served it. With a personal token this page
-    // came from the room's own server over the room's network, and the push
-    // goes to the room's log — the everyday door, made real. Without one this
-    // is the published renderer, which has no backend and never will: a push
-    // reaches a table tab in this same browser and nothing leaves the device.
-    import { openSheet, broadcastSink, httpSink } from './js/deposit.js';
+    // onto is decided by which desk served it. Served by the room, the push
+    // goes to the room's log — the everyday door, made real. Served by the
+    // published renderer, which has no backend and never will, a push reaches
+    // a table tab in this same browser and nothing leaves the device.
+    //
+    // One code for the whole room (keeper's ruling 2026-07-23): everyone scans
+    // the same one, taps their own name once, and this device remembers. A
+    // laptop claims the same way and is then shown its own line for a Claude
+    // session — one flow, both doors.
+    import { openSheet, claimGate, broadcastSink, httpSink } from './js/deposit.js';
 
-    // The QR carries the token once; the phone keeps it, so coming back to the
-    // desk later is not another trip to a printed slip of paper. Possession is
-    // identity here as it is in the tray — the token IS the person.
     const KEY = 'desk-room-token';
-    const fromQr = new URLSearchParams(location.search).get('t');
-    if (fromQr) { try { localStorage.setItem(KEY, fromQr); } catch { /* private mode: the URL still holds it */ } }
-    let token = fromQr;
-    if (!token) { try { token = localStorage.getItem(KEY); } catch { token = null; } }
+    const read = () => { try { return localStorage.getItem(KEY); } catch { return null; } };
+    const keep = (t) => { try { localStorage.setItem(KEY, t); } catch { /* private mode: this session only */ } };
 
-    // Who the desk is holding, and who else it knows — so the page opens
-    // already signed and an @ can offer the room. A desk that will not say
-    // (no token, or the published renderer) simply leaves both empty.
+    let token = new URLSearchParams(location.search).get('t') ?? read();
+    if (token) keep(token);
+
+    const ask = (path, init) => fetch(`${location.origin}${path}`, {
+      ...init,
+      headers: { ...(init?.headers ?? {}), ...(token ? { 'x-desk-token': token } : {}) },
+      cache: 'no-store',
+    });
+
     let me = null;
     let people = [];
-    if (token) {
-      try {
-        const res = await fetch(`${location.origin}/whoami`, { headers: { 'x-desk-token': token }, cache: 'no-store' });
-        if (res.ok) ({ name: me, people } = await res.json());
-      } catch { /* the room is not answering; the sheet still writes */ }
+    let room = false;
+    try {
+      const res = await ask('/whoami');
+      if (res.ok) { room = true; ({ name: me, people } = await res.json()); }
+    } catch { /* not the room's server: the published page, or it is not answering */ }
+
+    // A device the room does not know yet meets the cohort first.
+    if (room && !me) {
+      ({ token, name: me } = await claimGate({
+        people,
+        onClaim: async (name) => {
+          const res = await ask('/claim', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(body.refused ?? 'the desk did not take that');
+          return body;
+        },
+      }));
+      keep(token);
     }
 
+    const onRename = room && me ? async (name) => {
+      const res = await ask('/rename', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.refused ?? 'the desk did not take that');
+      people = (await (await ask('/whoami')).json()).people ?? people;
+      return body.name;
+    } : null;
+
     const sink = token ? httpSink(location.origin, token) : broadcastSink();
-    openSheet({ mode: 'page', container: document.body, sink, me, people });
+    openSheet({ mode: 'page', container: document.body, sink, me, people, onRename });
+
+    // A laptop that has claimed is shown its own line, once, below the sheet —
+    // ignorable on a phone, and exactly what is wanted where a session lives.
+    if (room && token) {
+      const line = document.createElement('div');
+      line.className = 'sheet__mcpline';
+      line.textContent = `claude mcp add desk --transport http ${location.origin}/mcp/${token}`;
+      document.body.append(line);
+    }
   </script>
 </body>
 </html>

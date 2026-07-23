@@ -31,7 +31,9 @@ async function open() {
   const root = mkdtempSync(join(tmpdir(), 'desk-http-'));
   writeFileSync(join(root, 'seed.json'), JSON.stringify(SEED));
   mkdirSync(join(root, 'drop'), { recursive: true });
-  writeFileSync(join(root, 'drop', 'people.json'), JSON.stringify({ [TOKEN]: { name: 'E.' } }));
+  writeFileSync(join(root, 'drop', 'people.json'), JSON.stringify({
+    people: [{ name: 'E.', tokens: [TOKEN] }, { name: 'M.', tokens: [] }],
+  }));
   // the pages the table needs, so the static allowlist can be exercised for real
   writeFileSync(join(root, 'index.html'), '<!doctype html><title>the desk</title>');
   writeFileSync(join(root, 'deposit.html'), '<!doctype html><title>add your work</title>');
@@ -141,14 +143,14 @@ test('a token the room does not know writes nothing, at either door', { skip: !H
   try {
     const hand = await d.deposit(handCard(), { 'x-desk-token': 'made-up' });
     assert.equal(hand.status, 403);
-    assert.match((await hand.json()).refused, /does not know that token/);
+    assert.match((await hand.json()).refused, /does not know that device/);
 
     const none = await d.deposit(handCard(), { 'x-desk-token': '' });
     assert.equal(none.status, 403);
 
     const session = await rpc(d.base, 'made-up', INIT);
     assert.equal(session.status, 403);
-    assert.match(session.body.error.message, /does not know that token/);
+    assert.match(session.body.error.message, /does not know that device/);
 
     assert.equal(lines(d.root).length, 0, 'a stranger left no trace');
   } finally {
@@ -256,12 +258,81 @@ test('the desk says who it is holding, and who else it knows — never a token',
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.name, 'E.', 'so the page can open already signed');
-    assert.deepEqual(body.people, ['E.'], 'and an @ has the room to offer');
+    assert.deepEqual(body.people, ['E.', 'M.'], 'and an @ has the room to offer');
     assert.equal(JSON.stringify(body).includes(TOKEN), false, 'the way in is never handed back out');
 
-    const stranger = await fetch(`${d.base}/whoami`, { headers: { 'x-desk-token': 'made-up' } });
+    // a device the desk has never seen is exactly who the cohort is FOR
+    const fresh = await (await fetch(`${d.base}/whoami`)).json();
+    assert.equal(fresh.name, null, 'it does not pretend to know them');
+    assert.deepEqual(fresh.people, ['E.', 'M.'], 'but it shows them the room, to tap their own name');
+  } finally {
+    await d.close();
+  }
+});
+
+test('tapping a name claims it for this device, and a second device is its own way in', { skip: !HAS_SDK && 'mcp/npm install has not run' }, async () => {
+  const d = await open();
+  const tap = (name, headers = {}) => fetch(`${d.base}/claim`, {
+    method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ name }),
+  });
+  try {
+    const first = await tap('M.');
+    assert.equal(first.status, 200);
+    const phone = await first.json();
+    assert.equal(phone.name, 'M.');
+
+    // that device can now lay a card, and it is signed without being asked
+    const card = handCard();
+    delete card.artifact.people;
+    const laid = await d.deposit(card, { 'x-desk-token': phone.token });
+    assert.equal(laid.status, 200);
+    assert.deepEqual(JSON.parse(lines(d.root)[0]).artifact.people, ['M.']);
+
+    const laptop = await (await tap('M.')).json();
+    assert.notEqual(laptop.token, phone.token, 'a second device gets its own token');
+    const both = await fetch(`${d.base}/whoami`, { headers: { 'x-desk-token': laptop.token } });
+    assert.equal((await both.json()).name, 'M.', 'and both are the same person');
+
+    const stranger = await tap('somebody else');
     assert.equal(stranger.status, 403);
-    assert.equal((await fetch(`${d.base}/whoami`)).status, 403, 'and no token is no answer');
+    assert.match((await stranger.json()).refused, /not in this room/);
+
+    const elsewhere = await tap('M.', { origin: 'https://evil.test' });
+    assert.equal(elsewhere.status, 403, 'and a claim from another origin is no claim');
+  } finally {
+    await d.close();
+  }
+});
+
+test('a person may be called something else, unless it is already someone', { skip: !HAS_SDK && 'mcp/npm install has not run' }, async () => {
+  const d = await open();
+  const say = (name, token) => fetch(`${d.base}/rename`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-desk-token': token },
+    body: JSON.stringify({ name }),
+  });
+  try {
+    // a card laid first keeps the name it was laid under
+    const card = handCard();
+    delete card.artifact.people;
+    await d.deposit(card);
+    assert.deepEqual(JSON.parse(lines(d.root)[0]).artifact.people, ['E.']);
+
+    const taken = await say('M.', TOKEN);
+    assert.equal(taken.status, 403);
+    assert.match((await taken.json()).refused, /already someone here/);
+
+    const done = await say('Emma Fell', TOKEN);
+    assert.equal(done.status, 200);
+    assert.equal((await done.json()).name, 'Emma Fell');
+    assert.deepEqual((await (await fetch(`${d.base}/whoami`, { headers: { 'x-desk-token': TOKEN } })).json()).people, ['Emma Fell', 'M.']);
+
+    // the card already on the table is untouched; the next one carries the new name
+    assert.deepEqual(JSON.parse(lines(d.root)[0]).artifact.people, ['E.'], 'the log is never rewritten');
+    const after = handCard();
+    delete after.artifact.people;
+    await d.deposit(after);
+    assert.deepEqual(JSON.parse(lines(d.root)[1]).artifact.people, ['Emma Fell']);
   } finally {
     await d.close();
   }

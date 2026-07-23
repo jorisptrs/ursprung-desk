@@ -14,9 +14,10 @@
 // publicly, and doing so would be a separate decision with its own consent
 // machinery.
 
-import { existsSync, readFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import express from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -34,47 +35,96 @@ const plain = (err) => String(err?.message ?? err).replace(/^stream reject: /, '
 
 // ---- who is at the door ----
 
-// One token per participant, registered once (mcp/people.mjs), carried into a
-// phone by their printed QR and into a session by the URL they were given.
-// The desk still signs for nobody (D121): the deliberate act is the
-// registration, and a card from an unknown token is refused rather than laid
-// anonymously. Read per request, so the keeper can add someone mid-retreat
-// without restarting the room.
+// The cohort, and the devices that have claimed a place in it (keeper's ruling
+// 2026-07-23). The keeper seeds names only; a token is minted when someone
+// taps their own name on a device, and a person may hold several — a phone and
+// a laptop are one person with two ways in.
+//
+// What this costs, said plainly: one QR on a wall means anyone on the room's
+// network can claim any unclaimed name. **The desk trusts the room.** That is
+// the same trust the table itself runs on — a communal surface among invited
+// people — and it is why none of this is exposed beyond the LAN. The desk
+// still signs for nobody (D121): tapping your own name is the deliberate act
+// that used to be the keeper handing you a slip.
+//
+// Read per request, so the keeper can add someone mid-retreat without a restart.
 export const peopleFileIn = (root) => join(root, 'drop', 'people.json');
+
+const clean = (v) => (typeof v === 'string' ? v.trim() : '');
+export const sameName = (a, b) => clean(a).toLowerCase() === clean(b).toLowerCase();
 
 export function readPeople(root = ROOT) {
   const file = peopleFileIn(root);
-  if (!existsSync(file)) return {};
+  if (!existsSync(file)) return [];
   try {
     const raw = JSON.parse(readFileSync(file, 'utf8'));
-    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const list = Array.isArray(raw?.people) ? raw.people : [];
+    return list
+      .map((p) => ({
+        name: clean(p?.name),
+        tokens: Array.isArray(p?.tokens) ? p.tokens.filter((t) => clean(t)) : [],
+        claimedAt: p?.claimedAt ?? null,
+      }))
+      .filter((p) => p.name);
   } catch (err) {
     warn(`people.json unreadable — ${plain(err)}`);
-    return {};
+    return [];
   }
+}
+
+export function writePeople(root, people) {
+  const file = peopleFileIn(root);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify({ people }, null, 2)}\n`);
+  return file;
 }
 
 export function whoIs(root, token) {
-  if (typeof token !== 'string' || !token.trim()) return null;
-  const entry = readPeople(root)[token.trim()];
-  const name = typeof entry === 'string' ? entry : entry?.name;
-  return typeof name === 'string' && name.trim() ? { token: token.trim(), name: name.trim() } : null;
+  const t = clean(token);
+  if (!t) return null;
+  const person = readPeople(root).find((p) => p.tokens.includes(t));
+  return person ? { token: t, name: person.name } : null;
 }
 
-const UNKNOWN = 'this desk does not know that token — ask the keeper for your own';
+const UNKNOWN = 'this desk does not know that device — scan the desk’s code and tap your name';
 
-// Everyone the room knows, by name, in the order they were registered. This is
-// what an `@` offers: on a communal table the people are the room, and a name
-// typed from a list is a name spelled the way its owner spells it — which is
-// the only way `people` stays one person per name rather than three spellings
-// of E. Tokens are never in here; they are the way in, not a fact about anyone.
-export function roster(root = ROOT) {
-  const names = [];
-  for (const entry of Object.values(readPeople(root))) {
-    const name = typeof entry === 'string' ? entry : entry?.name;
-    if (typeof name === 'string' && name.trim() && !names.includes(name.trim())) names.push(name.trim());
+// Everyone the room knows, by name, in the order the keeper seeded them. This
+// is what an `@` offers: on a communal table the people are the room, and a
+// name picked from the list is spelled the way its owner spells it — which is
+// what keeps `people` one person per name rather than three spellings of the
+// same one. Tokens are never in here; they are a way in, not a fact about
+// anyone, and they never leave this machine.
+export const roster = (root = ROOT) => readPeople(root).map((p) => p.name);
+
+// Tapping your own name on a device. A person may claim on as many devices as
+// they carry; each gets its own token, all of them the same person.
+export function claim(root, name) {
+  const people = readPeople(root);
+  const person = people.find((p) => sameName(p.name, name));
+  if (!person) return { refused: 'that name is not in this room’s cohort — ask the keeper to add it' };
+  const token = randomBytes(10).toString('base64url');
+  person.tokens.push(token);
+  person.claimedAt ??= new Date().toISOString();
+  writePeople(root, people);
+  return { token, name: person.name };
+}
+
+// Renaming binds what comes after, never what is already laid: the log is
+// append-only, so cards deposited under the old name keep it. A name is a
+// person here, so two people may not answer to one name.
+export function rename(root, token, next) {
+  const wanted = clean(next);
+  if (!wanted) return { refused: 'a name, please' };
+  const people = readPeople(root);
+  const person = people.find((p) => p.tokens.includes(clean(token)));
+  if (!person) return { refused: UNKNOWN };
+  if (people.some((p) => p !== person && sameName(p.name, wanted))) {
+    return { refused: `${wanted} is already someone here — pick another` };
   }
-  return names;
+  const was = person.name;
+  person.name = wanted;
+  writePeople(root, people);
+  return { name: wanted, was };
 }
 
 // ---- what the desk answers to ----
@@ -158,17 +208,38 @@ export function createRoom({ root = ROOT, port = DEFAULT_PORT } = {}) {
     next();
   };
 
-  // Who the sheet is holding, so a page can open already signed, and who else
-  // is in the building, so an @ can offer them. Names only, both times — the
-  // tokens are the way in and never leave the room machine.
+  // Who this device is, and who is in the room. Unlike every other read, this
+  // one answers a device the desk does not know yet — that is the whole point:
+  // it is what a freshly scanned phone sees, and the cohort is the list it taps
+  // its own name from. Names only, always; the tokens never leave this machine.
   app.get('/whoami', (req, res) => {
     const who = whoIs(root, req.get('x-desk-token') ?? req.query.t);
-    if (!who) {
-      res.status(403).json({ refused: UNKNOWN });
+    res.set('Cache-Control', 'no-store');
+    res.json({ name: who?.name ?? null, people: roster(root) });
+  });
+
+  // Tapping your own name. The device is handed a token and remembers it, so
+  // this happens once per device rather than once per card.
+  app.post('/claim', writeGuard, express.json({ limit: '16kb' }), (req, res) => {
+    const out = claim(root, req.body?.name);
+    if (out.refused) {
+      res.status(403).json(out);
       return;
     }
-    res.set('Cache-Control', 'no-store');
-    res.json({ name: who.name, people: roster(root) });
+    say(`${out.name} · claimed a device`);
+    res.json(out);
+  });
+
+  // And changing it afterwards. Cards already laid keep the name they were
+  // laid under — this binds what comes next.
+  app.post('/rename', writeGuard, express.json({ limit: '16kb' }), (req, res) => {
+    const out = rename(root, req.get('x-desk-token'), req.body?.name);
+    if (out.refused) {
+      res.status(403).json(out);
+      return;
+    }
+    say(`${out.was} · now ${out.name}`);
+    res.json(out);
   });
 
   app.post('/deposit', writeGuard, express.json({ limit: BODY_LIMIT }), (req, res) => {
@@ -274,12 +345,12 @@ if (isMainModule(import.meta.url)) {
   const room = createRoom({ root, port });
   await room.listen(port);
 
-  const people = Object.keys(readPeople(root)).length;
+  const people = readPeople(root);
+  const claimed = people.filter((p) => p.tokens.length).length;
   say(`the desk is open on ${port}`);
-  say(`  the table   http://desk.local:${port}/?live`);
-  say(`  the QR      http://desk.local:${port}/deposit.html?t=<token>`);
-  say(`  a session   claude mcp add desk --transport http http://desk.local:${port}/mcp/<token>`);
-  say(people
-    ? `  ${people} ${people === 1 ? 'person' : 'people'} registered`
-    : '  nobody registered yet — node mcp/people.mjs add "<name>"');
+  say(`  the table   http://desk.local:${port}/?rig&live`);
+  say(`  the one QR  http://desk.local:${port}/deposit.html`);
+  say(people.length
+    ? `  ${people.length} in the cohort, ${claimed} claimed`
+    : '  nobody in the cohort yet — node mcp/people.mjs add "<name>"');
 }
