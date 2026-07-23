@@ -327,12 +327,17 @@ test('a person may be called something else, unless it is already someone', { sk
     assert.equal((await done.json()).name, 'Emma Fell');
     assert.deepEqual((await (await fetch(`${d.base}/whoami`, { headers: { 'x-desk-token': TOKEN } })).json()).people, ['Emma Fell', 'M.']);
 
+    // a rename puts the new name on the table at once, without waiting for a card
+    const laid = () => lines(d.root).map((l) => JSON.parse(l));
+    assert.deepEqual(laid().filter((e) => e.e === 'roster').at(-1).people, ['Emma Fell'], 'a place on the wood (D172)');
+
     // the card already on the table is untouched; the next one carries the new name
-    assert.deepEqual(JSON.parse(lines(d.root)[0]).artifact.people, ['E.'], 'the log is never rewritten');
+    const cards = () => laid().filter((e) => e.e === 'deposit');
+    assert.deepEqual(cards()[0].artifact.people, ['E.'], 'the log is never rewritten');
     const after = handCard();
     delete after.artifact.people;
     await d.deposit(after);
-    assert.deepEqual(JSON.parse(lines(d.root)[1]).artifact.people, ['Emma Fell']);
+    assert.deepEqual(cards()[1].artifact.people, ['Emma Fell']);
   } finally {
     await d.close();
   }

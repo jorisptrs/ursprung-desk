@@ -22,7 +22,7 @@ import { dirname, join } from 'node:path';
 import express from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
-import { createDeskSink, depositHand, dropFileIn, isMainModule, MAX_ASSET_BYTES, Refusal, ROOT } from './core.mjs';
+import { appendEvent, createDeskSink, depositHand, dropFileIn, isMainModule, MAX_ASSET_BYTES, Refusal, ROOT } from './core.mjs';
 import { createServer as createDeskMcp } from './server.mjs';
 
 export const DEFAULT_PORT = 8080; // under 1024 needs root on macOS, and a QR hides a port anyway
@@ -124,6 +124,10 @@ export function rename(root, token, next) {
   const was = person.name;
   person.name = wanted;
   writePeople(root, people);
+  // The new name takes a place on the table at once, rather than waiting for
+  // its first card (D152). The old one keeps the place it was given — cards laid
+  // under it still carry it, and the log is not rewritten (D138).
+  try { appendEvent(root, { e: 'roster', night: 0, people: [wanted] }); } catch { /* the table is not the registry's business */ }
   return { name: wanted, was };
 }
 

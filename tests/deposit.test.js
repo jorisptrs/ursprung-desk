@@ -9,7 +9,7 @@ import {
   siteCardSvg, linkExcerpt, normalizeUrl, stripExt, slashTokenAt, refLineChange,
   classifyLine, parseDoc, composeDoc, migrateSheet, extractTitle, resolveFront,
   composeArtifact, validateArtifact, allocate, materialize, directSink, pageMeta,
-  hasTitleLine, doorRefusal, deckSpread,
+  hasTitleLine, doorRefusal, deckSpread, withoutSignature, mentionSpans, readsAsWriting,
 } from '../js/deposit.js';
 import { createStream } from '../js/stream.js';
 
@@ -49,7 +49,35 @@ test('inferWordsMedia: a line is manuscript; braces over lines are code', () => 
 test('parseMentions: @names read from the text as written, in order, deduped', () => {
   assert.deepEqual(parseMentions(['with @E. and @Claude', 'again @Claude, then @R.']), ['E.', 'Claude', 'R.']);
   assert.deepEqual(parseMentions('no one here'), []);
-  assert.deepEqual(parseMentions('mail@example.com is not a person… but @Ana is'), ['example.com', 'Ana'], 'the parser is simple on purpose — the preview shows what it read');
+  // a mention begins a word, so an address is not a person (D164)
+  assert.deepEqual(parseMentions('mail@example.com is not a person… but @Ana is'), ['Ana']);
+  assert.deepEqual(parseMentions('foo@Y. bar'), [], 'nor is anything hanging off the end of one');
+});
+
+test('a name is read wherever it is written, and the pill ends where it does (D164)', () => {
+  const roster = ['E.', 'Y.', 'Joris Peters', 'Ana', 'Anastasia'];
+  // inline, in every shape a sentence puts around it
+  for (const line of ['the third course held tune, @Y. showed me the trick', 'thanks @Y.', 'a note (@E.) in passing',
+    'see @E.: it holds', 'ask @Y.!', '“@E.” said so', 'the @E. version']) {
+    assert.ok(parseMentions([line], roster).length, `missed the name in: ${line}`);
+  }
+  // a name the room knows may hold a space, and the pill covers all of it
+  assert.deepEqual(parseMentions(['with @Joris Peters on the bench'], roster), ['Joris Peters']);
+  const [span] = mentionSpans('with @Joris Peters on the bench', roster);
+  assert.deepEqual([span.at, span.len, span.name], [5, 13, 'Joris Peters'], '@ + the whole name');
+  // longest first, so one name never swallows another
+  assert.deepEqual(parseMentions(['@Anastasia and @Ana'], roster), ['Anastasia', 'Ana']);
+  // and the reading the pill is drawn from is the reading the card is credited from
+  assert.deepEqual(mentionSpans('made by @E.,@Y.', roster).map((m) => m.name), ['E.', 'Y.']);
+  assert.deepEqual(mentionSpans('me@here.org and ask @Y.', roster).map((m) => m.name), ['Y.']);
+});
+
+test('a name in the title or a piece’s caption counts too (D164)', () => {
+  const people = (blocks) => composeArtifact({ blocks, roster: ['E.', 'Y.'] }).artifact.people ?? [];
+  assert.deepEqual(people([{ id: 't1', t: 'text', text: '# the zither, with @Y.\n\nrestrung twice' }]), ['Y.'],
+    'the title line is text a person writes a name in');
+  assert.deepEqual(people([{ id: 'p1', t: 'piece', p: { kind: 'image', caption: 'six hands, @Y. among them', name: 'a.png', blob: 'B', front: { form: 'crop', src: null } } }]), ['Y.'],
+    'and so is a caption');
 });
 
 test('soleUrl: a lone http(s) URL and nothing else', () => {
@@ -229,11 +257,11 @@ test('composeDoc (D96): the whole page → the artifact, everything downstream u
   const { artifact, blobs, blobKeys, unknownRefs } = composeDoc({
     docText: '# drone, phone take\nwith @B. and @Claude\n![take one](piece:au1)',
     pieces,
-    practice: 'music',
-  });
+      });
   assert.equal(artifact.media, 'audio');
   assert.equal(artifact.title, 'drone, phone take');
-  assert.equal(artifact.caption, 'B. + Claude');
+  assert.equal(artifact.caption, undefined, 'the makers travel in people; the face writes them (D148)');
+  assert.deepEqual(artifact.people, ['B.', 'Claude']);
   assert.deepEqual(artifact.detail.experience, { mode: 'play', src: null });
   assert.equal(blobs.experience, 'AUD');
   assert.equal(blobs[blobKeys.get('au1')], 'AUD', 'blob slots reachable through the piece id');
@@ -268,7 +296,7 @@ test("extractTitle (D90): the first '# ' line is the title and leaves the body",
 
 test('migrateSheet (D96): three tray generations collapse into the doc, blob keys verbatim', () => {
   const v1 = migrateSheet({
-    title: 'old card', kind: 'quest', practice: 'music', frontTextId: 'title',
+    title: 'old card', kind: 'quest', frontTextId: 'title',
     blocks: [
       tb('t1', 'body text @Y.'),
       pb('p1', { kind: 'image', name: 'a.png', caption: 'a cut', front: { form: 'crop', src: 'data:x' }, blobKey: 'piece:1' }),
@@ -284,15 +312,14 @@ test('migrateSheet (D96): three tray generations collapse into the doc, blob key
   assert.deepEqual(migrateSheet(v1), v1, 'idempotent');
   // and the migrated page still composes into a valid artifact
   const pieces = new Map(v1.pieces.map((sp) => [sp.id, { kind: sp.kind, name: sp.name, front: sp.front, blob: 'IMG' }]));
-  const { artifact, blobs } = composeDoc({ docText: v1.docText, pieces, kind: v1.kind, practice: v1.practice });
+  const { artifact, blobs } = composeDoc({ docText: v1.docText, pieces, kind: v1.kind });
   assert.equal(artifact.title, 'old card');
   assert.equal(validateArtifact(materialize(artifact, blobs, () => 'blob:probe')), null);
 });
 
 test('composeArtifact: a lone written line is a closed text card (D88)', () => {
   const { artifact, blobs } = composeArtifact({
-    practice: 'writing',
-    blocks: [tb('t1', 'The kiln holds at nine hundred. @R.')],
+        blocks: [tb('t1', 'The kiln holds at nine hundred. @R.')],
   });
   assert.equal(artifact.media, 'text');
   assert.equal(artifact.excerpt.text, 'The kiln holds at nine hundred. @R.');
@@ -303,17 +330,16 @@ test('composeArtifact: a lone written line is a closed text card (D88)', () => {
 });
 
 test('composeArtifact: title alone is a quiet note card; a title-less piece borrows its caption', () => {
-  const titled = composeArtifact({ practice: 'music', blocks: [tb('t1', '# rebuild the zither')] }).artifact;
+  const titled = composeArtifact({ blocks: [tb('t1', '# rebuild the zither')] }).artifact;
   assert.equal(titled.media, 'note');
   assert.equal(titled.excerpt.text, 'rebuild the zither');
-  const borrowed = composeArtifact({ practice: 'ceramics', blocks: [pb('p1', imgPiece())] }).artifact;
+  const borrowed = composeArtifact({ blocks: [pb('p1', imgPiece())] }).artifact;
   assert.equal(borrowed.title, 'kiln.png', 'the caption stands in so the schema holds');
 });
 
 test('composeArtifact: the editor is the back — order kept, blobs slotted, author on the front (D88)', () => {
   const { artifact, blobs, blobKeys } = composeArtifact({
-    practice: 'ceramics',
-    blocks: [
+        blocks: [
       tb('t0', '# the kiln door'),
       tb('t1', 'Fired with @T. and @Claude.'),
       pb('p1', imgPiece()),
@@ -324,7 +350,7 @@ test('composeArtifact: the editor is the back — order kept, blobs slotted, aut
   assert.equal(artifact.media, 'image');
   assert.equal(artifact.title, 'the kiln door');
   assert.deepEqual(artifact.people, ['T.', 'Claude']);
-  assert.equal(artifact.caption, 'T. + Claude', 'the author is always on the front');
+  assert.equal(artifact.caption, undefined, 'the makers travel in people; the face writes them (D148)');
   assert.deepEqual(artifact.detail.composition.map((e) => e.t), ['text', 'image', 'text', 'file'], 'the arrangement holds');
   assert.equal(artifact.detail.composition[1].src, null, 'the back image is the original, riding as a blob');
   assert.equal(blobs['piece:1'], 'IMG');
@@ -334,35 +360,33 @@ test('composeArtifact: the editor is the back — order kept, blobs slotted, aut
 });
 
 test('composeArtifact doors (D72): first audio/video plays, else the first link visits', () => {
-  const av = composeArtifact({ practice: 'music', blocks: [tb('t0', '# x'), pb('p1', audioPiece())] });
+  const av = composeArtifact({ blocks: [tb('t0', '# x'), pb('p1', audioPiece())] });
   assert.deepEqual(av.artifact.detail.experience, { mode: 'play', src: null });
   assert.equal(av.blobs.experience, 'AUD', 'the door plays the untouched original');
   assert.equal(av.artifact.detail.composition[0].orig, null, 'the original also shelves under the still');
 
   const link = composeArtifact({
-    practice: 'y',
-    blocks: [tb('t0', '# x'), pb('p1', { kind: 'link', href: 'https://x.test/', media: 'image', front: { form: 'render', src: 'data:svg' }, caption: 'x.test' })],
+        blocks: [tb('t0', '# x'), pb('p1', { kind: 'link', href: 'https://x.test/', media: 'image', front: { form: 'render', src: 'data:svg' }, caption: 'x.test' })],
   });
   assert.deepEqual(link.artifact.detail.experience, { mode: 'visit', src: 'https://x.test/' });
   assert.equal(link.artifact.detail.composition[0].embed, 'data:svg');
 
   const dismissed = composeArtifact({
-    practice: 'y',
-    blocks: [tb('t0', '# x'), tb('t1', 'a line'), pb('p1', { kind: 'link', href: 'https://x.test/', media: 'image', front: { form: 'render', src: 'data:svg' }, dismissed: true })],
+        blocks: [tb('t0', '# x'), tb('t1', 'a line'), pb('p1', { kind: 'link', href: 'https://x.test/', media: 'image', front: { form: 'render', src: 'data:svg' }, dismissed: true })],
   });
   assert.equal(dismissed.artifact.detail.composition[1].embed, undefined, 'clicked away: the plain line stays, the embed goes');
   assert.equal(dismissed.artifact.detail.experience.mode, 'visit', 'the door still leads to the work');
 });
 
 test("composeArtifact: kind rides through — Claude's failure is stored as the failure register", () => {
-  const { artifact } = composeArtifact({ practice: 'music', kind: 'failure', blocks: [tb('t0', '# fugue, again'), tb('t1', 'no use @M.')] });
+  const { artifact } = composeArtifact({ kind: 'failure', blocks: [tb('t0', '# fugue, again'), tb('t1', 'no use @M.')] });
   assert.equal(artifact.kind, 'failure');
   const s = createStream();
   s.append({ e: 'deposit', night: 0, artifact: { ...artifact, id: 'h-001' } });
 });
 
 test('validateArtifact: the stream speaks the dry line; a sound artifact is quiet', () => {
-  const good = composeArtifact({ practice: 'writing', blocks: [tb('t0', '# x'), tb('t1', 'y @E.')] }).artifact;
+  const good = composeArtifact({ blocks: [tb('t0', '# x'), tb('t1', 'y @E.')] }).artifact;
   assert.deepEqual(good.people, ['E.'], 'an @name is how a hand card says who made it (D118)');
   assert.match(validateArtifact({ ...good, people: undefined }), /a card needs an author/, 'anonymous is refused, in the sheet as anywhere');
   assert.equal(validateArtifact(good), null);
@@ -371,7 +395,6 @@ test('validateArtifact: the stream speaks the dry line; a sound artifact is quie
   assert.equal(validateArtifact({ ...good, title: '', caption: 'M. + Claude' }), null);
   assert.match(validateArtifact({ ...good, title: '', caption: undefined, excerpt: { form: 'words' } }),
     /a card needs a title, a caption, or a line of its own/, 'nothing readable at all is refused');
-  assert.match(validateArtifact({ ...good, practice: '' }), /practice/);
   assert.match(validateArtifact(composeArtifact({ blocks: [] }).artifact), /media/);
 });
 
@@ -387,8 +410,7 @@ test('allocate: h-### rides the fork, night is the current highest (D19)', () =>
 
 test('materialize: composition slots become URLs at the table, nothing else moves', () => {
   const { artifact, blobs } = composeArtifact({
-    practice: 'film',
-    blocks: [tb('t0', '# the walk'), pb('p1', { kind: 'video', name: 'walk.mov', caption: 'walk', blob: 'VID', front: { form: 'frames', src: 'data:strip' } })],
+        blocks: [tb('t0', '# the walk'), pb('p1', { kind: 'video', name: 'walk.mov', caption: 'walk', blob: 'VID', front: { form: 'frames', src: 'data:strip' } })],
   });
   const urls = [];
   const done = materialize(artifact, blobs, (b) => { urls.push(b); return `blob:${b}`; });
@@ -403,11 +425,11 @@ test('materialize: composition slots become URLs at the table, nothing else move
 test('directSink: allocates, appends, and lets the stream refuse (D85)', () => {
   const s = createStream();
   s.append({ e: 'deposit', night: 3, artifact: {
-    id: 'a-001', media: 'note', kind: 'quest', title: 'q', practice: 'p', people: ['R.'],
+    id: 'a-001', media: 'note', kind: 'quest', title: 'q', people: ['R.'],
     provenance: 'curator', visibility: 'public', excerpt: { form: 'words', text: 'q' },
   } });
   const sink = directSink(s);
-  const bare = composeArtifact({ practice: 'writing', blocks: [tb('t0', '# x'), tb('t1', 'a line of it @E.')] }).artifact;
+  const bare = composeArtifact({ blocks: [tb('t0', '# x'), tb('t1', 'a line of it @E.')] }).artifact;
   sink.deposit(bare, {});
   sink.deposit({ ...bare, title: 'x2' }, {});
   const ids = s.all().filter((e) => e.e === 'deposit').map((e) => e.artifact.id);
@@ -416,4 +438,32 @@ test('directSink: allocates, appends, and lets the stream refuse (D85)', () => {
   assert.throws(() => sink.deposit({ ...bare, title: '', caption: undefined, excerpt: { form: 'words' } }, {}),
     /a card needs a title, a caption, or a line of its own/, 'rejected, never coerced');
   assert.equal(s.all().length, 3, 'a refused deposit leaves no trace');
+});
+
+test('a signature is names, not prose — it is read and then it goes (D160)', () => {
+  // the pre-filled name sits at the foot of the same block the writing is in
+  // (D137), so stripping whole blocks would have left it standing
+  assert.equal(withoutSignature('the zither, restrung\n\n@E.'), 'the zither, restrung');
+  assert.equal(withoutSignature('@E. @Y.'), '', 'a page holding nothing but its signature says nothing');
+  assert.equal(withoutSignature('@E.\nthe zither, restrung'), 'the zither, restrung', 'wherever it stands');
+  // a name inside a sentence is part of the sentence and stays
+  assert.equal(withoutSignature('the third course held tune, @Y. showed me the trick'),
+    'the third course held tune, @Y. showed me the trick');
+  assert.equal(withoutSignature(''), '');
+
+  const { artifact } = composeArtifact({ blocks: [{ id: 't1', t: 'text', text: 'the zither, restrung\n\n@E. @Y.' }] });
+  assert.deepEqual(artifact.people, ['E.', 'Y.'], 'the names were read before the line went');
+  assert.equal(artifact.excerpt.text, 'the zither, restrung', 'and the face says them once, on its own line');
+  assert.equal(artifact.caption, undefined);
+});
+
+test('writing carried in as a file is writing (D168)', () => {
+  const asFile = (name, type, size = 100) => ({ name, type, size });
+  assert.ok(readsAsWriting(asFile('the poem.txt', 'text/plain')));
+  assert.ok(readsAsWriting(asFile('notes.md', '')), 'by name where the device says nothing');
+  assert.ok(readsAsWriting(asFile('run.py', '')));
+  assert.ok(!readsAsWriting(asFile('a.png', 'image/png')));
+  assert.ok(!readsAsWriting(asFile('take.mp4', 'video/mp4')));
+  assert.ok(!readsAsWriting(asFile('the novel.txt', 'text/plain', 900_000)), 'a novel is a file, not a card');
+  assert.ok(!readsAsWriting(null));
 });

@@ -180,8 +180,10 @@ try {
   // the page opens already signed: the card is E.'s before a word is written
   const opening = await evalIn(phone, '__view.state.doc.toString()');
   ok(opening.trim() === '@E.', `the page opens signed (${JSON.stringify(opening)})`);
-  const preSigned = await evalIn(phone, 'document.querySelector(".sheet__face .card__caption")?.textContent ?? ""');
-  ok(preSigned === 'E.', `and the front already says whose it is (${preSigned || 'nothing'})`);
+  const preSigned = await evalIn(phone, 'document.querySelector(".sheet__face .card__by")?.textContent ?? ""');
+  ok(preSigned === '@E.', `and the front already says whose it is (${preSigned || 'nothing'})`);
+  const asProse = await evalIn(phone, 'document.querySelector(".sheet__face .trace--words")?.textContent ?? ""');
+  ok(!asProse.includes('@'), `and says it once — the signature is not also prose (${JSON.stringify(asProse)})`);
   ok(await evalIn(phone, "!!document.querySelector('.sheet__action')"), 'the actions stand');
   await evalIn(phone, "act('push to table')");
   await sleep(600);

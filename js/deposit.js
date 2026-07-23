@@ -67,32 +67,46 @@ export function inferWordsMedia(text) {
 // Peters" reads the longer one. Everyone else still parses the simple way,
 // because someone in a studio may not be in the cohort at all — and the
 // preview shows what was read either way.
-export function parseMentions(texts, roster = []) {
+// Where each mention stands, and what name it names — one reading, used both to
+// credit the card and to draw the pill under the pen, so the two can never
+// disagree about where a name ends. That mattered once a name could hold a
+// space: the pill stopped at "@Joris" while the card was filed under "Joris
+// Peters", which looks exactly like the name not being recognized.
+export function mentionSpans(text, roster = []) {
   const known = [...new Set((roster ?? []).map((n) => String(n ?? '').trim()).filter(Boolean))]
     .sort((a, b) => b.length - a.length);
-  const people = [];
-  const take = (name) => { if (name && !people.includes(name)) people.push(name); };
-
-  for (const t of Array.isArray(texts) ? texts : [texts]) {
-    const s = String(t ?? '');
-    for (let i = s.indexOf('@'); i >= 0; i = s.indexOf('@', i + 1)) {
-      const rest = s.slice(i + 1);
-      const hit = known.find((n) => rest.slice(0, n.length).toLowerCase() === n.toLowerCase()
-        // a name ends where a word ends: "@Ana" must not swallow "@Anastasia"
-        && !/[\p{L}\d]/u.test(rest.charAt(n.length)));
-      if (hit) {
-        take(hit);
-        i += hit.length;
-        continue;
-      }
-      const m = /^([\p{L}][\p{L}\d._'-]*)/u.exec(rest);
-      if (!m) continue;
-      let name = m[1];
-      // a sentence's full stop is not part of the name — initials keep theirs
-      if (name.endsWith('.') && !/^(\p{L}\.)+$/u.test(name)) name = name.slice(0, -1);
-      take(name);
-      i += m[1].length;
+  const s = String(text ?? '');
+  const out = [];
+  for (let i = s.indexOf('@'); i >= 0; i = s.indexOf('@', i + 1)) {
+    // a mention begins a word. Without this an address is a person:
+    // "me@here.org" credited the card to here.org, which is the sort of thing
+    // nobody notices until a card is filed under a domain name.
+    if (/[\p{L}\d]/u.test(s.charAt(i - 1))) continue;
+    const rest = s.slice(i + 1);
+    const hit = known.find((n) => rest.slice(0, n.length).toLowerCase() === n.toLowerCase()
+      // a name ends where a word ends: "@Ana" must not swallow "@Anastasia"
+      && !/[\p{L}\d]/u.test(rest.charAt(n.length)));
+    if (hit) {
+      out.push({ at: i, len: hit.length + 1, name: hit });
+      i += hit.length;
+      continue;
     }
+    const m = /^([\p{L}][\p{L}\d._'-]*)/u.exec(rest);
+    if (!m) continue;
+    let name = m[1];
+    let len = m[1].length;
+    // a sentence's full stop is not part of the name — initials keep theirs
+    if (name.endsWith('.') && !/^(\p{L}\.)+$/u.test(name)) { name = name.slice(0, -1); len -= 1; }
+    out.push({ at: i, len: len + 1, name });
+    i += m[1].length;
+  }
+  return out;
+}
+
+export function parseMentions(texts, roster = []) {
+  const people = [];
+  for (const t of Array.isArray(texts) ? texts : [texts]) {
+    for (const m of mentionSpans(t, roster)) if (!people.includes(m.name)) people.push(m.name);
   }
   return people;
 }
@@ -287,9 +301,9 @@ export function parseDoc(docText, pieces = new Map(), linkMeta = new Map()) {
 }
 
 // The whole sheet → one artifact: parse, then the untouched composition.
-export function composeDoc({ docText = '', pieces = new Map(), linkMeta = new Map(), kind = 'work', practice = '', frontPieceId = null, roster = [] }) {
+export function composeDoc({ docText = '', pieces = new Map(), linkMeta = new Map(), kind = 'work', frontPieceId = null, roster = [] }) {
   const { blocks, unknownRefs } = parseDoc(docText, pieces, linkMeta);
-  const out = composeArtifact({ kind, practice, blocks, frontPieceId, frontTextId: null, roster });
+  const out = composeArtifact({ kind, blocks, frontPieceId, frontTextId: null, roster });
   return { ...out, unknownRefs };
 }
 
@@ -360,7 +374,6 @@ export function migrateSheet(s = {}) {
       v: 3,
       docText: String(s.docText ?? ''),
       kind: s.kind ?? 'work',
-      practice: s.practice ?? '',
       frontPieceId: s.frontPieceId ?? null,
       pieces: (s.pieces ?? []).map((p) => ({ ...p })),
       linkMeta: { ...(s.linkMeta ?? {}) },
@@ -390,7 +403,6 @@ export function migrateSheet(s = {}) {
     v: 3,
     docText: parts.join('\n\n'),
     kind: s.kind ?? 'work',
-    practice: s.practice ?? '',
     frontPieceId: s.frontPieceId ?? null,
     pieces,
     linkMeta: {},
@@ -427,19 +439,39 @@ export function resolveFront({ title = '', blocks = [], frontPieceId = null, fro
   return { piece, textBlock }; // textBlock null → the title (if any) is the front's text
 }
 
-export function composeArtifact({ practice = '', kind = 'work', blocks: rawBlocks = [], frontPieceId = null, frontTextId = null, roster = [] }) {
-  const { title, blocks } = extractTitle(rawBlocks);
+// A line that is nothing but names is a signature, not prose — and it lives in
+// the same text block as the writing above it, one blank line down (D137). Since
+// a card now carries its makers on its own line (D148), leaving it in wrote the
+// same names twice on one face, three times where the author caption still
+// stood. The names are read out of it first; the line itself goes.
+const isSignatureLine = (line) => line.trim() !== '' && !line.replace(/@[^\s@]+/g, '').trim();
+export const withoutSignature = (text) => String(text ?? '')
+  .split('\n')
+  .filter((line) => !isSignatureLine(line))
+  .join('\n')
+  .trim();
+
+export function composeArtifact({ kind = 'work', blocks: rawBlocks = [], frontPieceId = null, frontTextId = null, roster = [] }) {
+  const { title, blocks: written } = extractTitle(rawBlocks);
+  const blocks = written
+    .map((b) => (b.t === 'text' ? { ...b, text: withoutSignature(b.text) } : b))
+    .filter((b) => b.t !== 'text' || b.text);
   const { piece, textBlock } = resolveFront({ title, blocks, frontPieceId, frontTextId });
   const frontText = textBlock ? textBlock.text.trim() : title.trim();
-  const people = parseMentions(blocks.filter((b) => b.t === 'text').map((b) => b.text), roster);
+  // Everywhere a name can be written, in the order it is read down the page:
+  // the title line, the writing, and the caption a piece carries. The title and
+  // the captions were being missed, so "# the zither, with @Y." filed the card
+  // under nobody. The signature is read here too, before it is dropped.
+  const people = parseMentions([
+    title,
+    ...written.map((b) => (b.t === 'text' ? b.text : (b.p?.caption ?? ''))),
+  ], roster);
 
   const artifact = {
     kind,
     provenance: 'hand',
     visibility: 'public',
   };
-  const craft = practice.trim();
-  if (craft) artifact.practice = craft; // optional at the door (D17 amended)
 
   if (piece) {
     artifact.media = piece.p.kind === 'link' ? (piece.p.media ?? 'image') : piece.p.kind;
@@ -454,10 +486,9 @@ export function composeArtifact({ practice = '', kind = 'work', blocks: rawBlock
     artifact.excerpt = { form: 'words' };
     artifact.title = '';
   }
-  if (people.length) {
-    artifact.people = people;
-    artifact.caption = people.join(' + '); // the author is always on the front (D88)
-  }
+  // The makers travel in `people` and the face writes them itself (D148); the
+  // caption used to repeat them, which is the same names said twice.
+  if (people.length) artifact.people = people;
 
   // The back is the arrangement itself. Blob slots are keyed by composition
   // index; the first audio/video holds the play door, else the first link the
@@ -732,11 +763,26 @@ async function videoStrip(file) {
   }
 }
 
+// Writing carried in as a file is writing (keeper's ruling): a poem dropped as
+// a .txt lands on the page as its own words, so it fronts the card the way it
+// would if it had been pasted. The original still travels — the composition
+// keeps the file beside the text — but nobody has to download a poem to read it.
+const WRITTEN = /\.(txt|md|markdown|rtf|csv|tsv|log|json|ya?ml|xml|html?|css|js|mjs|ts|tsx|jsx|py|rb|go|rs|c|h|cpp|java|sh|sql)$/i;
+const READS_AS_TEXT = 400_000; // a novel is a file, not a card
+
+export const readsAsWriting = (file) =>
+  !!file && (String(file.type ?? '').startsWith('text/') || WRITTEN.test(file.name ?? ''))
+  && Number(file.size ?? 0) <= READS_AS_TEXT;
+
 // File → piece: the front cut and the untouched original together. A file the
 // device cannot read shelves whole — a quiet line, honest about what it holds.
 async function fileToPiece(file) {
   const media = inferMedia(file.name, file.type);
   try {
+    if (readsAsWriting(file)) {
+      const text = (await file.text()).replace(/\r\n/g, '\n').trim();
+      if (text) return { kind: 'written', name: file.name, caption: stripExt(file.name), blob: file, text };
+    }
     if (media === 'image') {
       return { kind: 'image', name: file.name, caption: stripExt(file.name), blob: file, front: { form: 'crop', src: await imageDataUrl(file) } };
     }
@@ -759,7 +805,16 @@ export function linkToPiece(href) {
 
 // ---- the sheet: one page, one editor, one front (D96) ----
 
-const KIND_LABELS = { work: 'work', failure: "Claude's failure", quest: 'quest' };
+// What each register is for, in the depositor's terms (keeper's ruling). The
+// third was called "Claude's failure", which asked people to file a verdict —
+// and half of what is worth recording there is Claude being surprisingly
+// useful. It is a note about working with Claude, either way.
+const KIND_LABELS = { work: 'work', quest: 'quest', failure: 'note on Claude' };
+const KIND_MEANS = {
+  work: 'an output, finished or half-way',
+  quest: 'an intention, or a challenge you could use help on',
+  failure: 'a case where Claude was remarkably helpful or unhelpful',
+};
 
 const h = (tag, cls, text) => {
   const node = document.createElement(tag);
@@ -881,33 +936,28 @@ export function openSheet({
   panel.append(head);
 
   // The register is its own field (D90): work · quest — and at the line's far
-  // right, the one flag there is (D98). Flagging Claude's failure is the only
-  // moment practice exists, and there it is required: the honest record is
-  // kept by craft.
+  // right, the one flag there is (D98). The flag asks nothing further of
+  // anyone now: what craft a work belongs to is read from the work itself.
   const kindRow = h('div', 'sheet__row sheet__meta');
   kindRow.append(h('span', 'sheet__label', 'enters as'));
   const kindEls = new Map();
   for (const k of ['work', 'quest']) {
     const opt = h('span', 'sheet__opt', KIND_LABELS[k]);
+    opt.dataset.means = KIND_MEANS[k]; // what it is for, on hover — never printed on the table
     opt.addEventListener('click', () => { state.kind = k; syncMeta(); refreshPreviews(); });
     kindEls.set(k, opt);
     kindRow.append(opt);
   }
-  const flag = h('span', 'sheet__opt sheet__flag', "flag Claude's failure");
+  const flag = h('span', 'sheet__opt sheet__flag', KIND_LABELS.failure);
+  flag.dataset.means = KIND_MEANS.failure;
   flag.addEventListener('click', () => {
     state.kind = state.kind === 'failure' ? 'work' : 'failure';
     syncMeta();
     refreshPreviews();
-    if (state.kind === 'failure') practice.focus();
   });
   kindRow.append(flag);
-  const practiceRow = h('div', 'sheet__row sheet__meta');
-  practiceRow.style.display = 'none';
-  const practice = h('input', 'sheet__field');
-  practice.placeholder = 'origami, composition, writing...';
-  practiceRow.append(h('span', 'sheet__label', 'practice'), practice);
   const editorBox = h('div', 'editor');
-  panel.append(kindRow, practiceRow, editorBox);
+  panel.append(kindRow, editorBox);
 
   const previews = h('div', 'sheet__previews');
   const frontBox = h('figure', 'sheet__face');
@@ -960,7 +1010,6 @@ export function openSheet({
   function syncMeta() {
     for (const [k, opt] of kindEls) opt.classList.toggle('sheet__opt--on', state.kind === k);
     flag.classList.toggle('sheet__opt--on', state.kind === 'failure');
-    practiceRow.style.display = state.kind === 'failure' ? '' : 'none';
   }
 
   // -- the composition → the one front face --
@@ -970,7 +1019,6 @@ export function openSheet({
     pieces: state.registry,
     linkMeta: state.linkMeta,
     kind: state.kind,
-    practice: practice.value,
     frontPieceId: state.frontPieceId,
     roster: people, // a name the room knows is read whole, spaces and all
   });
@@ -989,14 +1037,20 @@ export function openSheet({
     state.unknownRefs = unknownRefs;
     if (unknownRefs.length) say(`a reference points at nothing · ${unknownRefs.join(', ')}`);
     else if (status.textContent.startsWith('a reference points')) say('');
-    if (!artifact.media) {
+    // A page that is only its signature is not yet a card (the stream refuses
+    // one), but it is already SOMEBODY'S — and showing that is how the sheet
+    // teaches the '@' at all (D137). So a signed blank previews as a blank card
+    // with a name on it; a page with nothing at all previews as nothing.
+    const signedOnly = !artifact.media && artifact.people?.length;
+    if (!artifact.media && !signedOnly) {
       face(null, 'front of the card', ''); // the empty plate says it itself — no instruction on the sheet
       return;
     }
     const urlFor = (b) => { const u = URL.createObjectURL(b); state.previewUrls.push(u); return u; };
-    const front = renderCard({ ...materialize(artifact, blobs, urlFor), id: 'h-preview' });
+    const shownAs = signedOnly ? { ...artifact, media: 'note' } : artifact;
+    const front = renderCard({ ...materialize(shownAs, blobs, urlFor), id: 'h-preview' });
     front.classList.add('sheet__card');
-    face(front, front.classList.contains('card--backed') ? 'front of the card · the page above is its back' : 'front of the card · it stays closed', '');
+    face(front, front.classList.contains('card--backed') ? 'front of the card · the page above is its back' : 'front of the card', '');
   }
 
   // The link preview asks the page itself, once — og/twitter image and title;
@@ -1034,6 +1088,17 @@ export function openSheet({
     if (!taken.length) { say(refused ?? ''); return; }
     for (const file of taken) {
       const piece = await fileToPiece(file);
+      // Writing arrives as writing: the words go on the page where the caret is,
+      // so a poem carried in as a file is the same card as a poem pasted in.
+      if (piece.kind === 'written') {
+        const at = pos ?? ed?.cursor() ?? state.docText.length;
+        const change = refLineChange(state.docText, at, piece.text);
+        if (ed) ed.applyChange(change);
+        else state.docText = state.docText.slice(0, change.from) + change.insert + state.docText.slice(change.to);
+        captionSpan = null;
+        pos = null;
+        continue;
+      }
       const id = mintId();
       state.registry.set(id, piece);
       const caption = (piece.kind === 'file' ? '' : stripExt(file.name)).replace(/[\]\n]/g, ' ');
@@ -1148,8 +1213,7 @@ export function openSheet({
       v: 3,
       docText: state.docText,
       kind: state.kind,
-      practice: practice.value,
-      frontPieceId: state.frontPieceId,
+        frontPieceId: state.frontPieceId,
       linkMeta,
       pieces: referenced.map((b) => {
         const p = state.registry.get(b.id);
@@ -1170,7 +1234,6 @@ export function openSheet({
     state.linkMeta.clear();
     state.frontPieceId = null;
     state.editingId = null;
-    practice.value = '';
     if (ed) ed.setText(state.docText, { caretAt: 0 }); // the pen waits above the signature
     syncMeta();
     refreshPreviews();
@@ -1182,7 +1245,6 @@ export function openSheet({
     state.editingId = entry.id;
     state.kind = mapped.kind;
     state.frontPieceId = mapped.frontPieceId;
-    practice.value = mapped.practice;
     for (const [href, m] of Object.entries(mapped.linkMeta ?? {})) state.linkMeta.set(href, { status: 'done', ...m });
     state.docText = mapped.docText;
     for (const sp of mapped.pieces) {
@@ -1200,7 +1262,6 @@ export function openSheet({
     }
     syncMeta();
     refreshPreviews();
-    say('picked up from the deck · push it or set it aside again');
   }
 
   // The pile (D99/D114): every set-aside card in person, stacked. Open, each
@@ -1265,12 +1326,6 @@ export function openSheet({
     stack.style.setProperty('--open-h', `${maxY * 2 * spreadY + tallest + 12}px`);
   }
 
-  // The door's own rule, applied to a card nobody is holding (D99/D101).
-  const namelessFailure = (entry) =>
-    (entry.artifact?.kind === 'failure' && !entry.artifact.practice
-      ? 'a flagged failure names its practice'
-      : null);
-
   async function pickUp(entry) {
     if (entry.sheet) { loadEntry(entry); return; }
     // staged before this editor: it cannot reopen — one tap pushes it as it is
@@ -1298,8 +1353,7 @@ export function openSheet({
     return true;
   }
 
-  // the drawer holds unfinished work without questions — the practice guard
-  // stands at the push, where a card actually reaches the table (D99)
+  // the drawer holds unfinished work without questions
   aside.addEventListener('click', async () => {
     if (!hasAnything()) { say('write, drop, or paste something first'); return; }
     await stash();
@@ -1307,11 +1361,6 @@ export function openSheet({
 
   push.addEventListener('click', async () => {
     if (!hasAnything()) { say('write, drop, or paste something first'); return; }
-    if (state.kind === 'failure' && !practice.value.trim()) {
-      say('a flagged failure names its practice · origami, composition, writing...');
-      practice.focus();
-      return;
-    }
     const { artifact, blobs } = current();
     const probe = validateArtifact(materialize(artifact, blobs, () => 'blob:probe'));
     if (probe) { say(probe); return; }
@@ -1345,7 +1394,7 @@ export function openSheet({
     const entries = await tray.list();
     if (!entries.length) { say('the deck is empty'); return; }
     pushAll.classList.add('sheet__push--busy');
-    const { laid, rejected } = await tray.commit(sink, namelessFailure);
+    const { laid, rejected } = await tray.commit(sink);
     pushAll.classList.remove('sheet__push--busy');
     await refreshDeck();
     if (rejected.length) {

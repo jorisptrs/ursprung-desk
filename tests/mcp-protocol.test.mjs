@@ -18,7 +18,7 @@ const HAS_SDK = existsSync(join(ROOT, 'mcp', 'node_modules', '@modelcontextproto
 const SEED = {
   events: [{
     e: 'deposit', night: 3,
-    artifact: { id: 'a-001', media: 'note', kind: 'quest', title: 'a fold that will not close', practice: 'origami', people: ['R.'], provenance: 'curator', visibility: 'public', excerpt: { form: 'words', text: 'a fold that will not close' } },
+    artifact: { id: 'a-001', media: 'note', kind: 'quest', title: 'a fold that will not close', people: ['R.'], provenance: 'curator', visibility: 'public', excerpt: { form: 'words', text: 'a fold that will not close' } },
   }],
 };
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6360000002000100ffff03000006000557bfabd40000000049454e44ae426082', 'hex');
@@ -120,8 +120,7 @@ test('a confirmed card lands: one line, one asset, dry words back', { skip: !HAS
   try {
     const res = await call(c, {
       media: 'image', kind: 'work', title: 'the fold, closed',
-      caption: 'paper · R. + Claude', people: ['R.', 'Claude'], practice: 'origami',
-      excerpt: { path: join(c.root, 'crane.png') },
+      caption: 'paper · R. + Claude', people: ['R.', 'Claude'],       excerpt: { path: join(c.root, 'crane.png') },
     });
     assert.ok(!res.result.isError, said(res));
     assert.equal(said(res), 'm-001 · laid — the table has it');

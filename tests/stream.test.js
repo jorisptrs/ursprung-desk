@@ -10,8 +10,7 @@ function artifact(overrides = {}) {
     media: 'text',
     kind: 'work',
     title: 'a placeholder',
-    practice: 'manuscript',
-    people: ['E.'],
+        people: ['E.'],
     provenance: 'curator',
     visibility: 'public',
     excerpt: { form: 'sentence', text: 'one line' },
@@ -84,12 +83,6 @@ test('rejects a duplicate id', () => {
   assert.throws(() => s.append(deposit()), /duplicate id/);
 });
 
-test('practice is optional at the door, but never an empty word (D17 amended)', () => {
-  const s = createStream();
-  s.append(deposit({ practice: undefined }));
-  assert.throws(() => s.append(deposit({ id: 'a-002', practice: '' })), /practice/);
-});
-
 test('rejects retirement of an unknown artifact', () => {
   const s = createStream();
   assert.throws(() => s.append({ e: 'retire', night: 1, id: 'a-404' }), /unknown artifact/);
@@ -142,8 +135,6 @@ test('blank is not filled: whitespace never stands in for a word (D128)', () => 
     /a card needs a title, a caption, or a line of its own/);
   // nor is an author of one space an author
   assert.throws(() => s.append({ e: 'deposit', night: 0, artifact: artifact({ people: ['  '] }) }), /people must be strings/);
-  // and a blank practice is the same as none stated, which the stream refuses to call a practice
-  assert.throws(() => s.append({ e: 'deposit', night: 0, artifact: artifact({ practice: ' ' }) }), /practice, if present/);
 });
 
 test('a back is an object — an array is not one (D128)', () => {
@@ -151,4 +142,51 @@ test('a back is an object — an array is not one (D128)', () => {
   assert.throws(() => s.append({ e: 'deposit', night: 0, artifact: artifact({ detail: [1, 2, 3] }) }), /detail must be an object/);
   assert.throws(() => s.append({ e: 'deposit', night: 0, artifact: artifact({ detail: null }) }), /detail must be an object/);
   assert.doesNotThrow(() => s.append({ e: 'deposit', night: 0, artifact: artifact({ detail: { note: 'a line' } }) }));
+});
+
+test('an arrangement is a set of places, and every place lies on the table', () => {
+  const s = createStream();
+  const arrange = (over = {}) => ({ e: 'arrange', night: 2, places: { 'E.': [0.3, 0.4] }, ...over });
+
+  s.append(arrange());
+  s.append(arrange({ places: { 'E.': [0, 0], 'M.': [1, 1], Claude: [0.5, 0.5] }, why: 'the fold and the drone are one problem' }));
+  assert.equal(s.all().length, 2, 'the edges of the light are still on it');
+
+  assert.throws(() => s.append(arrange({ places: undefined })), /a set of places/);
+  assert.throws(() => s.append(arrange({ places: [] })), /a set of places/);
+  assert.throws(() => s.append(arrange({ places: {} })), /nobody in it/);
+  assert.throws(() => s.append(arrange({ places: { ' ': [0.1, 0.1] } })), /belongs to a name/);
+  assert.throws(() => s.append(arrange({ places: { 'E.': [0.1] } })), /an x and a y/);
+  assert.throws(() => s.append(arrange({ places: { 'E.': 0.1 } })), /an x and a y/);
+  assert.throws(() => s.append(arrange({ places: { 'E.': [1.4, 0.2] } })), /off the table/);
+  assert.throws(() => s.append(arrange({ places: { 'E.': [-0.1, 0.2] } })), /off the table/);
+  assert.throws(() => s.append(arrange({ places: { 'E.': ['a', 'b'] } })), /off the table/);
+  assert.throws(() => s.append(arrange({ why: '   ' })), /must say something/);
+  assert.throws(() => s.append({ e: 'arrange', places: { 'E.': [0.1, 0.1] } }), /night must be/);
+});
+
+test('the roster: the cohort is a fact in the log, and it only ever adds', () => {
+  const s = createStream();
+  assert.ok(s.append({ e: 'roster', night: 0, people: ['R.', 'Joris Peters'] }));
+  assert.throws(() => s.append({ e: 'roster', night: 0, people: [] }), /nobody in it/);
+  assert.throws(() => s.append({ e: 'roster', night: 0, people: ['R.', '  '] }), /belongs to a name/);
+  assert.throws(() => s.append({ e: 'roster', night: 0, people: 'R.' }), /nobody in it/);
+});
+
+test('the night is said, never worked out — and only ever moves forward (D175)', () => {
+  const s = createStream();
+  assert.ok(s.append({ e: 'night', night: 1 }));
+  assert.throws(() => s.append({ e: 'night', night: 1 }), /already night 1/);
+  assert.throws(() => s.append({ e: 'night', night: 0 }), /already night 1/);
+  assert.ok(s.append({ e: 'night', night: 2 }), 'and a night may skip one, if a day passed unrecorded');
+
+  // a deposit raises it too: the night is the log's, not one event type's
+  const fresh = createStream();
+  fresh.append({ e: 'deposit', night: 3, artifact: artifact({ id: 'x-1' }) });
+  assert.throws(() => fresh.append({ e: 'night', night: 2 }), /already night 3/);
+  assert.ok(fresh.append({ e: 'night', night: 4 }));
+
+  // the first night to begin is 1: night 0 is where the log starts
+  const opening = createStream();
+  assert.throws(() => opening.append({ e: 'night', night: 0 }), /the first night to begin is night 1/);
 });

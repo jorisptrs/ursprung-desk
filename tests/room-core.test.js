@@ -307,7 +307,8 @@ test('the signature makes the card yours, and replacing it hands it over', () =>
   // and both may stand — adding is just typing another
   const both = composeArtifact({ blocks: [{ id: 't1', t: 'text', text: 'the zither, restrung\n\n@E. @Y.' }] });
   assert.deepEqual(both.artifact.people, ['E.', 'Y.']);
-  assert.equal(both.artifact.caption, 'E. + Y.', 'and the front says who, in order');
+  assert.equal(both.artifact.caption, undefined, 'the makers travel in people; the face writes them itself (D148)');
+  assert.equal(both.artifact.excerpt.text, 'the zither, restrung', 'and the signature is not also prose');
 
   const laid = depositHand({ ...both.artifact, title: 'the zither, restrung' }, {}, { root, author: 'E.' });
   assert.deepEqual(laid.event.artifact.people, ['E.', 'Y.']);
@@ -326,4 +327,15 @@ test('blobs over the wire are decoded, bounded, and never silently empty', () =>
   assert.deepEqual(decodeBlobs(null), {});
   assert.deepEqual(decodeBlobs({ 'piece:0': 'not a blob' }), {}, 'a string is not a file');
   assert.match(words(() => decodeBlobs({ x: { name: 'e.png', b64: '' } })), /did not decode/);
+});
+
+test('a rename takes a place on the table at once, and the old one keeps its own (D172)', () => {
+  const { root } = fixture({ people: [{ name: 'E.', tokens: ['t1'], claimedAt: null }] });
+  const out = rename(root, 't1', 'Joris Peters');
+  assert.equal(out.name, 'Joris Peters');
+  const log = existsSync(dropFileIn(root)) ? readFileSync(dropFileIn(root), 'utf8').trim().split('\n') : [];
+  const rosters = log.map((l) => JSON.parse(l)).filter((e) => e.e === 'roster');
+  assert.deepEqual(rosters.at(-1)?.people, ['Joris Peters'], 'the new name is a place on the wood, not a wait for the first card');
+  // and nothing un-names the old one: the log is not rewritten (D138/D170)
+  assert.equal(log.some((l) => l.includes('unroster') || l.includes('rename')), false);
 });

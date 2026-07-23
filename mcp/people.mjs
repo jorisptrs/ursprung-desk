@@ -24,7 +24,7 @@ import { dirname, join } from 'node:path';
 
 import QRCode from 'qrcode';
 
-import { ROOT } from './core.mjs';
+import { ROOT, appendEvent } from './core.mjs';
 import { DEFAULT_PORT, peopleFileIn, readPeople, writePeople, sameName } from './room.mjs';
 
 const root = process.env.DESK_ROOT || ROOT;
@@ -54,7 +54,13 @@ function add(name) {
   }
   people.push({ name: name.trim(), tokens: [], claimedAt: null });
   writePeople(root, people);
-  say(`${name.trim()} · in the cohort`);
+  // The table opens as a room of named empty places rather than a void that
+  // fills, so registering someone puts their name on the wood at once — and a
+  // shared work then has both its ends to hang from, even before either maker
+  // has laid anything alone. drop/people.json never leaves this machine; the
+  // roster event carries only the names, which the table shows anyway.
+  appendEvent(root, { e: 'roster', night: 0, people: [name.trim()] });
+  say(`${name.trim()} · in the cohort, and a place on the table`);
   say(`  they scan the room's code and tap their name — nothing to hand over`);
 }
 
@@ -81,6 +87,10 @@ function remove(name) {
   const [gone] = people.splice(at, 1);
   writePeople(root, people);
   say(`${gone.name} · out of the cohort`);
+  // The registry is a list of who may claim a device; the table is a log, and a
+  // log is not rewritten (§9). So the name stays written on the wood where it
+  // was placed, with nothing standing in it — said plainly rather than found out.
+  say('  their place stays on the table; the log is not rewritten');
 }
 
 // One code, printed once, for the wall. The second, smaller code carries this

@@ -131,13 +131,27 @@ const HELPERS = `
     el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));    // the one that takes
     el.click();
   };
-  globalThis.tapCard = (id) => {
+  globalThis.tapOnce = (id) => {
     const el = document.querySelector('[data-id="' + id + '"]');
     const r = el.getBoundingClientRect();
     const at = { bubbles: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 };
     el.dispatchEvent(new PointerEvent('pointerdown', at));
     el.dispatchEvent(new PointerEvent('pointerup', at));
     el.dispatchEvent(new MouseEvent('click', at));
+  };
+  // A card in a studio's pile takes the two-beat: the first tap spreads the
+  // pile, the second takes the card. A card lying alone takes one. This helper
+  // reaches the card either way — the gesture itself is drilled in pile-e2e.
+  // Spreading is synchronous (the fold re-settles at once); the flip is queued.
+  // So if the card moved on this tap, the tap opened its pile — take the second
+  // beat. If it did not, the tap already went to the card.
+  globalThis.tapCard = (id) => {
+    // the settled style, not the rendered box: the spread transitions, so the
+    // box still reads the old place for a moment, but the style is already true
+    const at = () => document.querySelector('[data-id="' + id + '"]').style.transform;
+    const before = at();
+    tapOnce(id);
+    if (at() !== before) tapOnce(id);
   };
   globalThis.dragCard = (id) => {
     const el = document.querySelector('[data-id="' + id + '"]');
@@ -171,6 +185,14 @@ try {
   ok(await evalIn(table, `${HELPERS} until(() => !!document.querySelector('[data-id="a-017"]'), 30000)`, true), 'opening pass runs to rest (meta lands)');
 
   ok(await evalIn(table, `(() => { const b = document.querySelector('.add-btn'); if (!b) return false; const r = b.getBoundingClientRect(); return b.textContent === '+' && r.left < innerWidth / 2 && r.top > innerHeight / 2; })()`), 'a + waits in the pool\'s bottom-left (D91)');
+  ok(await evalIn(table, `(() => {
+    document.querySelector('.keys-btn').click();
+    const rows = [...document.querySelectorAll('.keys__row')].map((r) => r.textContent);
+    document.querySelector('.keys-btn').click();
+    // one row for adding a work, and it names the keys rather than repeating the + (D167)
+    return rows.filter((t) => t.includes('add your work')).length === 1
+      && rows.some((t) => t.includes('space or enter'));
+  })()`), 'the ? names the keys once, and does not repeat the + back at you');
   await press(table, 'Enter');
   ok(await evalIn(table, `${HELPERS} edReady()`, true), 'Enter is the +\'s key — the sheet opens, CodeMirror mounts (D98)');
   ok(await evalIn(table, `document.activeElement?.closest('.cm-editor') != null`), 'the pen is ready — the editor has focus');
@@ -182,13 +204,14 @@ try {
   await press(table, 'Backspace');
   ok((await evalIn(table, `docText()`)) === '', 'and trusted keys edit it');
 
-  ok(await evalIn(table, `document.querySelector('[placeholder^="origami"]').offsetParent === null`), 'practice exists nowhere until a failure is flagged (D98)');
+  ok(await evalIn(table, `!document.querySelector('[placeholder^="origami"]')`), 'the sheet asks for no craft at all — the work says what it is');
   ok(await evalIn(table, `(() => {
     const opts = [...document.querySelectorAll('.sheet__opt')].filter((e) => e.offsetParent !== null);
     const flag = document.querySelector('.sheet__flag');
-    return opts.map((e) => e.textContent).join('|') === "work|quest|flag Claude's failure"
+    return opts.map((e) => e.textContent).join('|') === 'work|quest|note on Claude'
+      && opts.every((e) => (e.dataset.means || '').length > 20) // each says what it is for, at once on hover (D165)
       && flag.getBoundingClientRect().right > document.querySelector('.sheet__opt').getBoundingClientRect().right + 100;
-  })()`), "work · quest stand open; the flag waits at the line's far right (D98)");
+  })()`), "work · quest stand open; the note on Claude waits at the line's far right (D98/D165)");
   ok(await evalIn(table, `getComputedStyle(document.querySelector('.editor')).backgroundColor === 'rgb(222, 209, 182)'`), 'the editor is the parchment back itself (D95)');
   ok(await evalIn(table, `getComputedStyle(document.querySelector('.sheet__deck')).display === 'none'`), 'empty deck stays hidden');
 
@@ -212,7 +235,8 @@ try {
   await press(table, 'Backspace');
   await press(table, 'Backspace');
   ok(await evalIn(table, `${HELPERS} until(() => document.querySelector('.sheet__face .card--note .trace--words')?.textContent === 'kiln note, day two', 3000)`, true), "the '# ' line becomes the title on the front");
-  ok((await evalIn(table, `document.querySelector('.sheet__face .card__caption')?.textContent`)) === 'T. + Claude', 'the author reads from the @-mentions');
+  ok((await evalIn(table, `document.querySelector('.sheet__face .card__by')?.textContent`)) === '@T. + Claude',
+    'the author reads from the @-mentions, on its own line (D148/D160)');
   ok(await evalIn(table, `document.querySelector('.cm-line.desk-title')?.textContent === 'kiln note, day two'`), "the '# ' marks hide once the pen has left the title line (D98)");
   ok(await evalIn(table, `document.querySelectorAll('.desk-mention').length >= 2`), 'the names wear their quiet pills (D98)');
   await evalIn(table, `${HELPERS} act('push to table')`);
@@ -329,7 +353,8 @@ try {
   await evalIn(table, `clearDoc()`);
 
   await evalIn(table, `${HELPERS} tapDeck('.deck-card')`);
-  ok(await evalIn(table, `${HELPERS} until(() => docText().includes('the west door') && sheetStatus().includes('picked up from the deck'), 4000)`, true), 'a tap hands the card back to the pen');
+  ok(await evalIn(table, `${HELPERS} until(() => docText().includes('the west door'), 4000)`, true),
+    'a tap hands the card back to the pen — and says nothing about it, the page having changed under your eyes (D167)');
   ok(await evalIn(table, `__view.hasFocus && __view.state.selection.main.head === __view.state.doc.length`), 'picked up means in hand — the editor holds the pen at the end (D99)');
   await evalIn(table, `${HELPERS} act('push to table')`);
   ok(await evalIn(table, `${HELPERS} until(() => {
@@ -483,7 +508,7 @@ try {
   // the slash menu: everything on offer, Esc closes only itself
   await insert(phone, '/');
   ok((await evalIn(phone, `${HELPERS} until(() => document.querySelectorAll('.cm-tooltip-autocomplete li').length === 7, 3000)`, true)), 'a bare / offers the seven doors — no registers hiding in it (D98)');
-  ok(!(await evalIn(phone, `[...document.querySelectorAll('.cm-tooltip-autocomplete li')].map((li) => li.textContent).join('|')`)).match(/work|quest|failure|practice/), 'registers and practice left the menu (D98)');
+  ok(!(await evalIn(phone, `[...document.querySelectorAll('.cm-tooltip-autocomplete li')].map((li) => li.textContent).join('|')`)).match(/work|quest|failure/), 'registers left the menu (D98)');
   await press(phone, 'Escape');
   ok(await evalIn(phone, `!document.querySelector('.cm-tooltip-autocomplete') && !!document.querySelector('.sheet--page .editor')`), 'Esc closes the menu and nothing else');
   await evalIn(phone, `clearDoc()`);
@@ -497,7 +522,7 @@ try {
   ok(await evalIn(phone, `${HELPERS} until(() => docText().includes('<http://localhost:8123/>') && !document.querySelector('.link-preview'), 3000)`, true), 'clicking the preview away leaves the plain link');
   await evalIn(phone, `clearDoc()`);
 
-  // a recording: waveform still, md title, /practice as the side door
+  // a recording: waveform still, md title
   await evalIn(phone, `${HELPERS} (() => {
     const rate = 8000, n = rate;
     const buf = new ArrayBuffer(44 + n * 2); const v = new DataView(buf);
@@ -531,10 +556,7 @@ try {
   await insert(phone, 'by @B.'); // every card names its author (D118)
   await press(phone, 'Enter');
   await evalIn(phone, `document.querySelector('.sheet__flag').click()`);
-  ok(await evalIn(phone, `document.querySelector('.sheet__flag').classList.contains('sheet__opt--on') && document.querySelector('[placeholder^="origami"]').offsetParent !== null`), 'flagging the failure raises the practice field, required (D98)');
-  await evalIn(phone, `${HELPERS} act('push to table')`);
-  ok((await evalIn(phone, `sheetStatus()`)).includes('names its practice'), 'a flagged failure will not reach the table nameless (D99)');
-  await evalIn(phone, `${HELPERS} set('[placeholder^="origami"]', 'music')`);
+  ok(await evalIn(phone, `document.querySelector('.sheet__flag').classList.contains('sheet__opt--on')`), 'the flag stands, and asks nothing further of anyone');
   ok(await evalIn(phone, `${HELPERS} until(() => !!document.querySelector('.sheet__face .card--audio.kind--failure'), 4000)`, true), 'the front previews the ashen register (D95/D98)');
   await sleep(400);
   const shot1 = await phone.send('Page.captureScreenshot', { format: 'png' });
@@ -544,9 +566,9 @@ try {
   ok(await evalIn(table, `${HELPERS} until(() => {
     const el = document.querySelector('#field [data-id="h-004"]');
     return !!el && el.classList.contains('card--audio') && el.classList.contains('kind--failure')
-      && el.querySelector('.back__door')?.dataset.door === 'play'
+      && !!el.querySelector('[data-plays] audio') && !!el.querySelector('[data-plays] [data-seek]')
       && el.querySelector('.card__trace img')?.src.startsWith('data:image/svg');
-  }, 8000)`, true), 'the flagged card crosses the channel — ashen, waveform front, play door behind');
+  }, 8000)`, true), 'the flagged card crosses the channel — ashen, waveform front, a player behind (D147)');
   await sleep(600);
   const shot2 = await table.send('Page.captureScreenshot', { format: 'png' });
   writeFileSync('/tmp/desk-shots/e2e-table-after.png', Buffer.from(shot2.data, 'base64'));
@@ -562,9 +584,9 @@ try {
     const tx = db.transaction('entries', 'readwrite');
     tx.objectStore('entries').put({
       id: 's-99', seq: 99,
-      artifact: { media: 'text', kind: 'work', title: 'old card', practice: 'music', people: ['Y.'], provenance: 'hand', visibility: 'public', excerpt: { form: 'sentence', text: 'the body line @Y.' } },
+      artifact: { media: 'text', kind: 'work', title: 'old card', people: ['Y.'], provenance: 'hand', visibility: 'public', excerpt: { form: 'sentence', text: 'the body line @Y.' } },
       blobs: {},
-      sheet: { title: 'old card', kind: 'work', practice: 'music', frontTextId: 'title', blocks: [{ id: 't1', t: 'text', text: 'the body line @Y.' }] },
+      sheet: { title: 'old card', kind: 'work', frontTextId: 'title', blocks: [{ id: 't1', t: 'text', text: 'the body line @Y.' }] },
     });
     await new Promise((res) => { tx.oncomplete = res; });
     db.close();

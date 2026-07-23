@@ -7,6 +7,7 @@
 // table.
 
 import { renderCard, backModel } from './cards.js';
+import { packSpread } from './layout.js';
 import { CARD_W, NOMINAL_H } from './fold.js';
 import { sleep } from './queue.js';
 import { isPlace } from './stream.js';
@@ -25,9 +26,14 @@ const READ_H_FRAC = 0.6; // of its height, so a grown card still lies in the lig
 const READ_MAX = 560; // px
 const READ_MIN = 200;
 const OPEN_H_FRAC = 0.86; // the tallest a card in hand may stand
+const FONT_OF_W = 0.075; // a card's type, as a fraction of its width — laid or in hand
 const PIECE_MAX_FRAC = 0.66; // of that: a still shares its leaf, never takes it whole (D102)
 
-const threadKey = (t) => `${t.from}→${t.to}`;
+// A thread's identity is its two ends, and an anchor's far end is the STUDIO it
+// hangs from — never that studio's coordinates, which change every time the map
+// is redrawn. Keying on the place meant a rearrangement destroyed every anchor
+// and built new ones in their stead, so they blinked instead of travelling.
+const threadKey = (t) => `${t.from}→${t.to ?? `@${t.toStack ?? ''}`}`;
 
 export function createView(field, { rig = false } = {}) {
   const cardEls = new Map(); // artifact id → element
@@ -36,20 +42,199 @@ export function createView(field, { rig = false } = {}) {
   let lastState = { cards: [], threads: [] };
   let rect = { w: field.clientWidth, h: field.clientHeight };
   let flippedId = null; // one card in hand at a time (D73); view-ephemera, never logged (D23)
-  let playing = null; // the one summoned experience: { cardId, el, doorEl } (D75)
   let openPage = 0; // which leaf of the open card's back is showing (D100)
   let openLeaves = [0]; // where each leaf begins, in the open back's own pixels
+  let openPile = null; // which studio's pile is spread open — view-ephemera too
 
   const layer = document.createElement('div');
   layer.className = 'threads';
   field.append(layer);
+  // Where each studio stands, named. It lies under its own pile and is only
+  // read where a studio holds no cards of its own — someone whose whole week is
+  // collaborations — which is exactly where a thread would otherwise end in
+  // empty air. It is also where the next card will arrive.
+  const marks = document.createElement('div');
+  marks.className = 'studios';
+  field.append(marks);
+  const markEls = new Map(); // person → element
 
   const short = () => Math.min(rect.w, rect.h);
+  let lastPointer = { x: 0, y: 0 }; // where a press landed, for seeking along a line
+  field.addEventListener('pointerdown', (e) => { lastPointer = { x: e.clientX, y: e.clientY }; }, true);
 
   const cardSizePx = (card) => {
     const w = short() * CARD_W * card.scale;
     return { w, h: w * (NOMINAL_H[card.artifact.media] ?? 0.9) };
   };
+
+  // ---- a pile spread open (D115's two-beat, borrowed from the editor's deck) ----
+
+  // Which pile a card lies in: a studio by name, or the shared place a set of
+  // hands keeps between them. The fold decided this; the view only reads it.
+  const pileKey = (card) => card.pile ?? (card.between ? `~${card.between}` : null);
+
+  // What a studio holds, opened (keeper's ruling): everything that person made,
+  // their collaborations included — a quest asked alone and the work that
+  // answered it with somebody else belong to one thread of thinking, and having
+  // to hunt for the second half on a shared place between two piles is exactly
+  // the reading the map was meant to make possible. In the order they were
+  // made, which is the order the log is in.
+  //
+  // A shared place opened on its own shows only what those hands made together:
+  // it is a place two people keep, not a third person.
+  const inSpread = (card) => {
+    if (!openPile) return false;
+    if (pileKey(card) === openPile) return true;
+    return !openPile.startsWith('~') && (card.makers ?? []).includes(openPile);
+  };
+  const inOpenPile = () => (openPile ? lastState.cards.filter(inSpread) : []);
+
+  // Where a card of the open pile lies, in px from where it lies stacked. The
+  // pile opens to exactly the room its own cards need — a pile of two goes two
+  // wide, a pile of one grows nothing — and the block is nudged back inside the
+  // light, so a studio at the edge opens inward rather than off the table.
+  let spreadCache = null;
+  function spreadPlan() {
+    const key = `${openPile}·${Math.round(rect.w)}×${Math.round(rect.h)}`;
+    if (spreadCache?.key === key) return spreadCache.plan;
+    const group = inOpenPile();
+    let plan = null;
+    if (group.length > 1) {
+      const gap = Math.max(6, short() * 0.012); // the thin margin between cards
+      const sizes = group.map((c) => {
+        const el = cardEls.get(c.id);
+        const { w, h } = cardSizePx(c);
+        return { w: el?.offsetWidth || w, h: el?.offsetHeight || h };
+      });
+      // wide rows, because a studio opened is a sequence to follow along: the
+      // oldest at the top left, the newest at the end (D161)
+      const pack = packSpread(sizes, gap, rect.w * 0.8);
+      // the studio's own place is the middle of its stack (fold.js), so the
+      // spread opens around the same point the pile stood on
+      const [cx, cy] = [group[0].x * rect.w, group[0].y * rect.h];
+      const m = Math.max(8, short() * 0.015);
+      const fit = (c, size, max) =>
+        size + m * 2 >= max ? max / 2 : Math.min(Math.max(c, size / 2 + m), max - size / 2 - m);
+      const ox = fit(cx, pack.w, rect.w) - cx;
+      const oy = fit(cy, pack.h, rect.h) - cy;
+      plan = new Map(group.map((c, i) => [c.id, {
+        dx: ox + pack.offsets[i].dx + cx - c.x * rect.w,
+        dy: oy + pack.offsets[i].dy + cy - c.y * rect.h,
+      }]));
+    }
+    spreadCache = { key, plan };
+    return plan;
+  }
+
+  function spreadOf(card) {
+    if (!inSpread(card)) return null;
+    return spreadPlan()?.get(card.id) ?? null;
+  }
+
+  // ---- a move is a move, not a jump (D162) ----
+  //
+  // D87 said placements are instant, and that stands: a card ARRIVES where it
+  // will lie forever, because a table that performs on arrival is a screen. But
+  // a card that is already lying somewhere and ends up somewhere else has
+  // *moved*, and a jump reads as a glitch rather than as a change — which
+  // matters most in the replay, where the whole point is watching the cohort
+  // find each other. So: arrivals snap, moves travel.
+  //
+  // Measured from the rendered box rather than from the model, so it catches
+  // every kind of move at once — a pile opening, a pile closing, a night's
+  // rearrangement — and the settled style is always the truth underneath. The
+  // element is put back where it was with a transform and animated to nothing,
+  // so nothing but the compositor is asked to work.
+  const MOVE_MS = 620;
+  let boxesBefore = null;
+  let threadsBefore = null;
+  let instant = false; // the still surfaces never travel (D62)
+
+  // Whether anything has been rearranged, asked of the fold's own places rather
+  // than of the DOM: reading a hundred boxes to find out that nothing moved
+  // would force a layout on every event of the pass.
+  function placesMoved(was, now) {
+    const a = was?.places;
+    const b = now?.places;
+    if (!a || !b) return false;
+    for (const key of Object.keys(b)) {
+      const p = a[key];
+      if (p && Math.hypot(p[0] - b[key][0], p[1] - b[key][1]) > 0.001) return true;
+    }
+    return false;
+  }
+
+  function watchMoves() {
+    boxesBefore = new Map();
+    for (const [id, el] of cardEls) boxesBefore.set(id, el.getBoundingClientRect());
+    // and the strings, which are px and re-laid rather than re-flowed: without
+    // this they snapped to where the piles are going while the piles were still
+    // on their way, which is the one thing that made a move look wrong
+    threadsBefore = new Map();
+    for (const [key, el] of threadEls) {
+      if (el.style.display !== 'none' && el.style.transform) threadsBefore.set(key, el.style.transform);
+    }
+  }
+
+  function playMoves() {
+    const before = boxesBefore;
+    const strings = threadsBefore;
+    boxesBefore = null;
+    threadsBefore = null;
+    if (!before || rig) return;
+    for (const [key, el] of threadEls) {
+      const was = strings?.get(key);
+      const now = el.style.transform;
+      if (!was || !now || was === now || el.style.display === 'none') continue;
+      track(el.animate([{ transform: was }, { transform: now }], { duration: MOVE_MS, easing: EASE }));
+    }
+    for (const [id, el] of cardEls) {
+      const was = before.get(id);
+      if (!was) continue; // it was not on the table a moment ago: an arrival, which snaps
+      const now = el.getBoundingClientRect();
+      const dx = was.left - now.left;
+      const dy = was.top - now.top;
+      if (Math.hypot(dx, dy) < 1.5) continue;
+      const settled = el.style.transform || 'none';
+      track(el.animate(
+        [{ transform: `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) ${settled}` }, { transform: settled }],
+        { duration: MOVE_MS, easing: EASE },
+      ));
+    }
+  }
+
+  // What a thread must stop short of at a studio's place: the pile standing
+  // there, or — where the studio is still empty — the name written on the wood.
+  // Never the bare point, which is the middle of the stack and would run the
+  // string in under the cards and out the other side.
+  const MARK_GAP = 5; // px of air between the string and what it points at
+  function placeBoxPx(thread, state, from) {
+    const [px, py] = thread.toPlace;
+    const cx = px * rect.w;
+    const cy = py * rect.h;
+    const bare = { cx, cy, x1: cx, y1: cy, x2: cx, y2: cy };
+
+    // The card of that pile the string actually meets, not the box around all of
+    // them: a pile cascades, so its bounding box has empty corners, and stopping
+    // at one of those leaves the string ending in mid-air beside the stack.
+    const mine = state.cards.filter((c) => (c.pile ?? c.between) === thread.toStack);
+    if (mine.length) {
+      const boxes = mine.map((c) => cardBoxPx(c));
+      const near = boxes.reduce((best, b) =>
+        (Math.hypot(b.cx - from.cx, b.cy - from.cy) < Math.hypot(best.cx - from.cx, best.cy - from.cy) ? b : best));
+      return {
+        cx, cy,
+        x1: near.x1 - MARK_GAP, y1: near.y1 - MARK_GAP,
+        x2: near.x2 + MARK_GAP, y2: near.y2 + MARK_GAP,
+      };
+    }
+
+    const el = markEls.get(thread.toStack);
+    if (!el || el.dataset.held !== '0') return bare;
+    const w = el.offsetWidth / 2 + MARK_GAP;
+    const h = el.offsetHeight / 2 + MARK_GAP;
+    return { cx, cy, x1: cx - w, y1: cy - h, x2: cx + w, y2: cy + h };
+  }
 
   const cardBoxPx = (card) => {
     // prefer the real rendered box (content-driven heights, the D66 floor);
@@ -58,8 +243,9 @@ export function createView(field, { rig = false } = {}) {
     const { w: mw, h: mh } = cardSizePx(card);
     const w = el?.offsetWidth || mw;
     const h = el?.offsetHeight || mh;
-    const cx = card.x * rect.w;
-    const cy = card.y * rect.h;
+    const spread = spreadOf(card);
+    const cx = card.x * rect.w + (spread?.dx ?? 0);
+    const cy = card.y * rect.h + (spread?.dy ?? 0);
     return { x1: cx - w / 2, y1: cy - h / 2, x2: cx + w / 2, y2: cy + h / 2, cx, cy };
   };
 
@@ -68,22 +254,34 @@ export function createView(field, { rig = false } = {}) {
   function settleCard(el, card, z) {
     el.style.left = `${(card.x * 100).toFixed(2)}%`;
     el.style.top = `${(card.y * 100).toFixed(2)}%`;
-    // width and font floor together (same breakpoint), so shape never distorts
-    el.style.width = `max(${(CARD_W * 100 * card.scale).toFixed(2)}cqmin, ${Math.round(FLOOR_W * card.scale)}px)`;
-    el.style.fontSize = `max(${(CARD_W * 100 * card.scale * 0.075).toFixed(3)}cqmin, ${(FLOOR_W * 0.075 * card.scale).toFixed(1)}px)`;
     const pivot = el.querySelector('.card__pivot');
-    if (card.id === flippedId) { // in hand: grown, straightened, lifted, fully lit
-      // height first, so the in-hand pose is computed on the true size
-      layoutOpenBack(el);
+    el.toggleAttribute('data-lit', card.id === flippedId || inSpread(card));
+    // a work made with somebody else is visiting this studio's timeline, not
+    // living in it — marked, so the pile still says which are its own
+    el.toggleAttribute('data-shared', inSpread(card) && pileKey(card) !== openPile);
+    if (card.id === flippedId) {
+      // A card in hand is set at its reading size, not blown up to it: a
+      // transform scale resamples what was already painted, so at ×4 the text
+      // was a photograph of text. Growing the box instead makes the browser lay
+      // the type out again at the size it is read at, which is the whole point
+      // of picking a card up. The turn still rides a transform — motion is what
+      // a compositor is for — but it lands on a real size (D155).
+      const w = readWidthPx(card);
+      el.style.width = `${w.toFixed(1)}px`;
+      el.style.fontSize = `${(w * FONT_OF_W).toFixed(2)}px`;
+      layoutOpenBack(el); // height after width, so it measures the true box
       el.style.transform = flippedTransform(card, el);
       el.style.opacity = 1;
       el.style.zIndex = 400;
       if (pivot) pivot.style.transform = 'rotateY(180deg)';
     } else {
+      // width and font floor together (same breakpoint), so shape never distorts
+      el.style.width = `max(${(CARD_W * 100 * card.scale).toFixed(2)}cqmin, ${Math.round(FLOOR_W * card.scale)}px)`;
+      el.style.fontSize = `max(${(CARD_W * 100 * card.scale * FONT_OF_W).toFixed(3)}cqmin, ${(FLOOR_W * FONT_OF_W * card.scale).toFixed(1)}px)`;
       closeBack(el);
-      el.style.transform = `translate(-50%, -50%) rotate(${card.rot}deg)`;
+      el.style.transform = laidKeyframe(card);
       el.style.opacity = card.opacity;
-      el.style.zIndex = z;
+      el.style.zIndex = spreadOf(card) ? 300 + (card.depth ?? 0) : z;
       if (pivot) pivot.style.transform = '';
     }
   }
@@ -140,7 +338,6 @@ export function createView(field, { rig = false } = {}) {
   // stand, it stays at that height and the arrangement pages. Pure layout —
   // called on settle and whenever a leaf is turned.
   function layoutOpenBack(el) {
-    const grow = flipGrow(el);
     const back = el.querySelector('.card__back');
     const flow = back?.querySelector('.back__flow');
     if (!back || !flow) { el.style.height = ''; return; }
@@ -151,7 +348,7 @@ export function createView(field, { rig = false } = {}) {
       return (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
     };
     const laidH = el.offsetHeight;
-    const maxH = (rect.h * OPEN_H_FRAC) / grow;
+    const maxH = rect.h * OPEN_H_FRAC; // the element is already at its reading size (D155)
     // a still is held to part of the card before anything is measured, so one
     // tall photograph cannot become the whole reading (D102)
     back.style.setProperty('--piece-max', `${Math.round(maxH * PIECE_MAX_FRAC)}px`);
@@ -238,14 +435,21 @@ export function createView(field, { rig = false } = {}) {
   }
 
   // Thread geometry: center to center, trimmed to the two cards' rendered
-  // rects so the draw-on is visible end to end (nothing draws under paper).
+  // rects so the line is visible end to end (nothing draws under paper). An
+  // anchor runs from a shared work to a studio's place rather than to another
+  // card — that end is a point on the table, so nothing is trimmed off it.
   function threadGeom(thread, state) {
     const byId = new Map(state.cards.map((c) => [c.id, c]));
     const a = byId.get(thread.from);
-    const b = byId.get(thread.to);
-    if (!a || !b) return null;
+    if (!a) return null;
     const A = cardBoxPx(a);
-    const B = cardBoxPx(b);
+    // An anchor runs to a studio's place, which is the middle of its stack. Where
+    // the studio stands empty its name is written there, so the thread backs off
+    // that name's own box rather than running through the letters.
+    const B = thread.toPlace
+      ? placeBoxPx(thread, state, A)
+      : cardBoxPx(byId.get(thread.to) ?? {});
+    if (!thread.toPlace && !byId.get(thread.to)) return null;
     const dx = B.cx - A.cx;
     const dy = B.cy - A.cy;
     const span = Math.hypot(dx, dy);
@@ -253,7 +457,7 @@ export function createView(field, { rig = false } = {}) {
     const ux = dx / span;
     const uy = dy / span;
     const tA = rayExit(A.cx, A.cy, ux, uy, A); // leave the from-card
-    const tB = rayExit(B.cx, B.cy, -ux, -uy, B); // back off the to-card
+    const tB = rayExit(B.cx, B.cy, -ux, -uy, B); // back off whatever stands there
     const len = span - tA - tB;
     if (len <= 2) return null; // cards touch — nothing to draw between them
     return {
@@ -267,8 +471,19 @@ export function createView(field, { rig = false } = {}) {
   const threadTransform = (g, scale = 1) =>
     `translate(${g.x.toFixed(1)}px, ${g.y.toFixed(1)}px) rotate(${g.angle.toFixed(4)}rad) scaleX(${(g.len * scale).toFixed(1)})`;
 
+  // What a thread claims, and when it says so (keeper's ruling 2026-07-23).
+  // An anchor holds a shared work between the studios that made it, and is
+  // always drawn: without it the card is an orphan in a gap. Every other
+  // thread is a claim about two works — a quest answered, a problem shared —
+  // and at castle scale drawing them all at once is a web. So they wait for
+  // their card to be picked up, which is the gesture that already means
+  // "tell me more about this one". The cartography comes back whole at replay
+  // and at the closing ceremony, where the map is the point.
+  const threadShows = (thread) =>
+    thread.anchor || (flippedId != null && (thread.from === flippedId || thread.to === flippedId));
+
   function settleThread(el, thread, state) {
-    const g = threadGeom(thread, state);
+    const g = threadShows(thread) ? threadGeom(thread, state) : null;
     el.style.display = g ? '' : 'none';
     if (g) el.style.transform = threadTransform(g);
     el.style.opacity = thread.opacity;
@@ -277,49 +492,100 @@ export function createView(field, { rig = false } = {}) {
 
   // ---- reconcile ----
 
-  function reconcile(state) {
-    const seenCards = new Set();
-    state.cards.forEach((card, i) => {
-      let el = cardEls.get(card.id);
+  // Three layers, kept in step with the fold by the same pattern each time: make
+  // what is new, settle what stands, remove what the state no longer names.
+  function keepInStep(want, els, make, settle, parent) {
+    const seen = new Set();
+    for (const [key, item] of want) {
+      let el = els.get(key);
       if (!el) {
-        el = renderCard(card.artifact);
+        el = make(item);
+        els.set(key, el);
+        parent.append(el);
+      }
+      settle(el, item);
+      seen.add(key);
+    }
+    for (const [key, el] of els) {
+      if (seen.has(key)) continue;
+      el.remove();
+      els.delete(key);
+    }
+  }
+
+  function reconcileCards(state) {
+    const z = new Map(state.cards.map((c, i) => [c.id, i + 1]));
+    const gone = new Set(cardEls.keys());
+    for (const c of state.cards) gone.delete(c.id);
+    // a retired card leaves the hand too, before its element is taken away
+    for (const id of gone) if (id === flippedId) { flippedId = null; stopExperience(id); }
+    keepInStep(
+      state.cards.map((c) => [c.id, c]),
+      cardEls,
+      (card) => {
+        const el = renderCard(card.artifact, { rig });
+        wirePlayers(el);
         el.dataset.id = card.id;
-        cardEls.set(card.id, el);
-        field.append(el);
-      }
-      settleCard(el, card, i + 1);
-      seenCards.add(card.id);
-    });
-    for (const [id, el] of cardEls) {
-      if (!seenCards.has(id)) {
-        if (id === flippedId) { flippedId = null; stopExperience(); } // a retired card leaves the hand too
-        el.remove();
-        cardEls.delete(id);
-      }
-    }
-    const seenThreads = new Set();
-    for (const thread of state.threads) {
-      const key = threadKey(thread);
-      let el = threadEls.get(key);
-      if (!el) {
-        el = document.createElement('div');
+        return el;
+      },
+      (el, card) => settleCard(el, card, z.get(card.id)),
+      field,
+    );
+  }
+
+  function reconcileStudios(state) {
+    keepInStep(
+      (state.studios ?? []).map((s) => [s.name, s]),
+      markEls,
+      (studio) => {
+        const el = document.createElement('div');
+        el.className = 'studio';
+        el.textContent = `@${studio.name}`;
+        return el;
+      },
+      (el, studio) => {
+        el.style.left = `${(studio.place[0] * 100).toFixed(2)}%`;
+        el.style.top = `${(studio.place[1] * 100).toFixed(2)}%`;
+        el.dataset.held = String(studio.held);
+      },
+      marks,
+    );
+  }
+
+  function reconcileThreads(state) {
+    keepInStep(
+      state.threads.map((t) => [threadKey(t), t]),
+      threadEls,
+      () => {
+        const el = document.createElement('div');
         el.className = 'thread';
-        threadEls.set(key, el);
-        layer.append(el);
-      }
-      settleThread(el, thread, state);
-      seenThreads.add(key);
-    }
-    for (const [key, el] of threadEls) {
-      if (!seenThreads.has(key)) {
-        el.remove();
-        threadEls.delete(key);
-      }
-    }
+        return el;
+      },
+      (el, thread) => settleThread(el, thread, state),
+      layer,
+    );
+  }
+
+  function reconcile(state) {
+    if (!instant && boxesBefore === null && placesMoved(lastState, state)) watchMoves();
+    const moving = boxesBefore !== null;
+    reconcileCards(state);
+    reconcileStudios(state); // after the cards: a mark is read only where its pile is empty
+    reconcileThreads(state); // and last, since a thread is measured off both
+    // While something is being read, the rest of the table steps back a little.
+    // Brightness, never opacity — opacity is how the table says age (D14), and
+    // two meanings on one channel is how a legend gets invented.
+    field.toggleAttribute('data-reading', flippedId != null || openPile != null);
     lastState = state;
+    if (moving) playMoves();
   }
 
   function renderInstant(state) {
+    instant = true;
+    try { return renderStill(state); } finally { instant = false; }
+  }
+
+  function renderStill(state) {
     cancelActive();
     reconcile(state);
   }
@@ -363,33 +629,52 @@ export function createView(field, { rig = false } = {}) {
   // reads beyond the card's own laid size.
   // How much a card grows when it comes into the hand: enough to read, never
   // wider than the light allows, never smaller than it lay (D100).
-  function flipGrow(el) {
-    const w = el.offsetWidth || 1;
-    const target = Math.max(READ_MIN, Math.min(READ_MAX, rect.w * READ_W_FRAC, rect.h * READ_H_FRAC));
-    return Math.max(1, target / w);
-  }
+  // The two sizes a card has, both computed rather than measured, so either can
+  // be known while the element is wearing the other.
+  const laidWidthPx = (card) => Math.max(CARD_W * card.scale * short(), FLOOR_W * card.scale);
+  const readWidthPx = (card) => Math.max(
+    laidWidthPx(card), // never smaller than it lay
+    READ_MIN, // …nor smaller than a column anyone would read
+    Math.min(READ_MAX, rect.w * READ_W_FRAC, rect.h * READ_H_FRAC),
+  );
+  // how far the element must be scaled to look like the other size, for the turn
+  const flipGrow = (card) => readWidthPx(card) / Math.max(1, laidWidthPx(card));
 
-  function flipPose(card, el) {
-    const grow = flipGrow(el);
-    const gw = el.offsetWidth * grow;
-    const gh = el.offsetHeight * grow;
+  // Where the open card sits so it stays in the light. `at` says which size the
+  // element is wearing while we ask: at its reading size the box is what it
+  // measures, at its laid size the open box is that box grown.
+  function flipPose(card, el, at = 'read') {
+    const by = at === 'read' ? 1 : flipGrow(card);
+    const gw = el.offsetWidth * by;
+    const gh = el.offsetHeight * by;
     const m = Math.max(10, short() * 0.02);
+    const spread = spreadOf(card);
     const cx = card.x * rect.w;
     const cy = card.y * rect.h;
     const fit = (c, half, max) =>
       half * 2 + m * 2 >= max ? max / 2 : Math.min(Math.max(c, half + m), max - half - m);
-    return { dx: fit(cx, gw / 2, rect.w) - cx, dy: fit(cy, gh / 2, rect.h) - cy };
+    return {
+      dx: fit(cx + (spread?.dx ?? 0), gw / 2, rect.w) - cx,
+      dy: fit(cy + (spread?.dy ?? 0), gh / 2, rect.h) - cy,
+    };
   }
 
-  function flippedTransform(card, el) {
-    const pose = flipPose(card, el);
-    return `translate(calc(-50% + ${pose.dx.toFixed(1)}px), calc(-50% + ${pose.dy.toFixed(1)}px)) rotate(0deg) scale(${flipGrow(el).toFixed(3)})`;
+  // `at` is the size the element is actually wearing right now: a pose describes
+  // where the card looks, and the scale is only ever the difference between the
+  // two sizes — 1 whenever the element is already the size it should look.
+  function flippedTransform(card, el, at = 'read') {
+    const pose = flipPose(card, el, at);
+    const scale = at === 'read' ? 1 : flipGrow(card);
+    return `translate(calc(-50% + ${pose.dx.toFixed(1)}px), calc(-50% + ${pose.dy.toFixed(1)}px)) rotate(0deg) scale(${scale.toFixed(3)})`;
   }
 
   // Keyframes need matching transform-function lists, or interpolation falls
   // into matrix decomposition. The turn itself lives on the pivot alone.
-  const laidKeyframe = (card) =>
-    `translate(calc(-50% + 0px), calc(-50% + 0px)) rotate(${card.rot}deg) scale(1)`;
+  const laidKeyframe = (card, at = 'laid') => {
+    const s = spreadOf(card);
+    const scale = at === 'laid' ? 1 : 1 / flipGrow(card);
+    return `translate(calc(-50% + ${(s?.dx ?? 0).toFixed(1)}px), calc(-50% + ${(s?.dy ?? 0).toFixed(1)}px)) rotate(${card.rot}deg) scale(${scale.toFixed(3)})`;
+  };
 
   async function turnCard(id, open, token) {
     const card = lastState.cards.find((c) => c.id === id);
@@ -398,21 +683,26 @@ export function createView(field, { rig = false } = {}) {
       if (!open && flippedId === id) flippedId = null;
       return;
     }
-    if (!open && playing?.cardId === id) stopExperience(); // flip-back is stillness
+    if (!open) stopExperience(id); // a card laid down goes quiet
     const pivot = el.querySelector('.card__pivot');
     const wasOpen = flippedId === id;
-    const fromPose = wasOpen ? flippedTransform(card, el) : laidKeyframe(card);
+    // the poses are read after settleCard has resized the element, so each is
+    // expressed against the size it is then wearing
+    const fromPose = wasOpen
+      ? () => flippedTransform(card, el, 'laid') // was open, element now laid
+      : () => laidKeyframe(card, 'read'); // was laid, element now at reading size
     const fromTurn = wasOpen ? 'rotateY(180deg)' : 'rotateY(0deg)';
     const fromOpacity = wasOpen ? 1 : card.opacity;
     flippedId = open ? id : null;
     if (open) openPage = 0; // a card comes into the hand at its first leaf (D100)
     const z = lastState.cards.findIndex((c) => c.id === id) + 1;
     settleCard(el, card, z); // truth first; the turn is an overlay
+    relayThreads(); // and the card in hand is the one whose threads speak
     if (!open) el.style.zIndex = 400; // stay lifted while turning back down
-    const toPose = open ? flippedTransform(card, el) : laidKeyframe(card);
+    const toPose = open ? flippedTransform(card, el, 'read') : laidKeyframe(card, 'laid');
     const anims = [
       track(el.animate(
-        [{ transform: fromPose, opacity: fromOpacity }, { transform: toPose, opacity: open ? 1 : card.opacity }],
+        [{ transform: fromPose(), opacity: fromOpacity }, { transform: toPose, opacity: open ? 1 : card.opacity }],
         { duration: FLIP_MS, easing: EASE },
       )),
     ];
@@ -427,7 +717,9 @@ export function createView(field, { rig = false } = {}) {
       sleep(FLIP_MS + SETTLE_GRACE_MS),
       token.aborted,
     ]);
-    if (!open && flippedId !== id) el.style.zIndex = z; // laid again, back into the pile
+    // laid again — back into the pile, which is still above the table while it
+    // is open, or the card sinks under the studios beside it
+    if (!open && flippedId !== id) settleCard(el, card, z);
   }
 
   // One queue job (D13): a swap is one exchange — the open card starts down,
@@ -463,47 +755,75 @@ export function createView(field, { rig = false } = {}) {
 
   // ---- the summoned experience (D72/D75): once, in place, stillness after ----
 
-  function stopExperience() {
-    if (!playing) return;
-    playing.el.pause?.();
-    playing.el.remove?.();
-    if (playing.doorEl) playing.doorEl.textContent = 'play';
-    playing = null;
+  // A card laid down goes quiet (D75's promise, kept against the new mechanism):
+  // the players live on the back now, so stillness means pausing what is there.
+  function stopExperience(id) {
+    if (id == null) return;
+    for (const el of cardEls.get(id)?.querySelectorAll('[data-plays] audio, [data-plays] video') ?? []) el.pause();
   }
 
-  function tapDoor(id, doorEl) {
+  // ---- the desk's own transport (D151) ----
+
+  const clock = (t) => {
+    if (!Number.isFinite(t) || t < 0) t = 0;
+    return `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+  };
+
+  // The bar is painted from the recording, never the other way round: seeking
+  // sets the time and the next frame draws it, so a dropped event cannot leave
+  // the line saying something the sound is not doing.
+  function paintPlayer(wrap) {
+    const media = wrap.querySelector('audio, video');
+    if (!media) return;
+    const done = media.duration > 0 ? media.currentTime / media.duration : 0;
+    wrap.querySelector('.play__run').style.width = `${(done * 100).toFixed(2)}%`;
+    wrap.querySelector('[data-mark]').dataset.mark = media.paused ? 'play' : 'pause';
+    const left = wrap.querySelector('[data-at]');
+    left.textContent = media.duration > 0 ? clock(media.duration - media.currentTime) : '';
+  }
+
+  // One press works whatever is under it: the mark starts and stops, the line
+  // moves through. A press anywhere else on a player is not a press on the card.
+  function workPlayer(target) {
+    const wrap = target.closest('[data-plays]');
+    const media = wrap?.querySelector('audio, video');
+    if (!media) return;
+    if (target.closest('[data-seek]')) {
+      const line = target.closest('[data-seek]').getBoundingClientRect();
+      const at = Math.min(1, Math.max(0, (lastPointer.x - line.left) / (line.width || 1)));
+      if (media.duration > 0) media.currentTime = at * media.duration;
+      paintPlayer(wrap);
+      return;
+    }
+    if (media.paused) {
+      for (const other of field.querySelectorAll('[data-plays] audio, [data-plays] video')) {
+        if (other !== media) other.pause(); // one recording at a time, always (D75)
+      }
+      media.play().catch(() => {});
+    } else media.pause();
+  }
+
+  // the players of a card just built: painted once, and repainted as they run
+  function wirePlayers(el) {
+    for (const wrap of el.querySelectorAll('[data-plays]')) {
+      const media = wrap.querySelector('audio, video');
+      if (!media || media.dataset.wired) continue;
+      media.dataset.wired = '';
+      for (const ev of ['timeupdate', 'loadedmetadata', 'play', 'pause', 'ended', 'seeked']) {
+        media.addEventListener(ev, () => paintPlayer(wrap));
+      }
+      paintPlayer(wrap);
+    }
+  }
+
+  // The only door left is 'visit': the work runs elsewhere and the table stays
+  // still. A recording no longer needs a door — it plays on the back (D147).
+  function tapDoor(id) {
     const card = lastState.cards.find((c) => c.id === id);
     const model = card ? backModel(card.artifact) : null;
-    if (!model?.door) return;
-    if (model.door.mode === 'visit') { // the work runs elsewhere; the table stays still
-      if (!isPlace(model.door.src)) return; // never a script, however it got here (D127)
-      window.open(model.door.src, '_blank', 'noopener');
-      return;
-    }
-    if (playing?.cardId === id) { // tap again: stillness
-      stopExperience();
-      return;
-    }
-    stopExperience(); // one at a time, always
-    const src = !rig && model.door.demoSrc ? model.door.demoSrc : model.door.src;
-    if (card.artifact.media === 'video') {
-      const video = document.createElement('video');
-      video.className = 'back__player';
-      video.src = src;
-      video.playsInline = true;
-      video.autoplay = true;
-      video.onended = stopExperience;
-      video.onerror = stopExperience;
-      cardEls.get(id)?.querySelector('.card__back')?.append(video);
-      playing = { cardId: id, el: video, doorEl };
-    } else {
-      const audio = new Audio(src);
-      audio.onended = stopExperience;
-      audio.onerror = stopExperience;
-      audio.play().catch(() => stopExperience());
-      playing = { cardId: id, el: audio, doorEl };
-    }
-    if (doorEl) doorEl.textContent = 'still'; // the door word is its own stop
+    if (model?.door?.mode !== 'visit') return;
+    if (!isPlace(model.door.src)) return; // never a script, however it got here (D127)
+    window.open(model.door.src, '_blank', 'noopener');
   }
 
   // Cache-warm a trace image without touching the DOM — decoding after the
@@ -542,9 +862,35 @@ export function createView(field, { rig = false } = {}) {
     if (pace.wait) await Promise.race([sleep(pace.wait), token.aborted]);
   }
 
-  function onResize() {
-    rect = { w: field.clientWidth, h: field.clientHeight };
-    // cards are %/cqmin and re-flow by CSS; threads are px and re-laid here
+  // threads are px, so they are re-laid by hand: on resize, and whenever a card
+  // is picked up or put down, since that is what decides which of them show
+  // The first tap on a pile spreads it; the second takes a card in hand. A pile
+  // of one is not a pile — that tap goes straight through to the flip. Returns
+  // whether the tap was spent here.
+  function spreadPile(id) {
+    const card = id == null ? null : lastState.cards.find((c) => c.id === id);
+    if (card && inSpread(card)) return false; // already open: the card is the target now
+    const key = card ? pileKey(card) : null;
+    const group = key ? lastState.cards.filter((c) => pileKey(c) === key || (!key.startsWith('~') && (c.makers ?? []).includes(key))) : [];
+    const next = group.length > 1 ? key : null;
+    if (next === openPile) return false;
+    openPile = next;
+    spreadCache = null; // measured from the laid cards; they are about to change
+    watchMoves(); // opening or shutting a pile is a move, and reads as one
+    if (flippedId != null) { // one thing in hand at a time: the card goes back down
+      stopExperience(flippedId);
+      const was = cardEls.get(flippedId);
+      if (was) closeBack(was); // give the grown height back before the pack measures
+      flippedId = null;
+    }
+    reconcile(lastState);
+    return next != null;
+  }
+
+  const pileOpen = () => openPile != null;
+  const inHand = () => flippedId;
+
+  function relayThreads() {
     const byKey = new Map(lastState.threads.map((t) => [threadKey(t), t]));
     for (const [key, el] of threadEls) {
       const t = byKey.get(key);
@@ -552,5 +898,11 @@ export function createView(field, { rig = false } = {}) {
     }
   }
 
-  return { renderInstant, playEvent, cancelActive, finishActive, onResize, flipJob, flipInstant, tapDoor, pageBack };
+  function onResize() {
+    rect = { w: field.clientWidth, h: field.clientHeight };
+    spreadCache = null;
+    relayThreads(); // cards are %/cqmin and re-flow by CSS
+  }
+
+  return { renderInstant, playEvent, cancelActive, finishActive, onResize, flipJob, flipInstant, tapDoor, pageBack, spreadPile, pileOpen, inHand, workPlayer };
 }

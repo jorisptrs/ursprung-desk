@@ -51,6 +51,29 @@ html.rig, html.rig body { cursor: none; }
   pointer-events: none;
 }
 
+/* The studios: a name written on the wood where a person's pile stands. Under
+   the cards, so it is read only where the pile is empty — and a thread from a
+   shared work then lands on a name rather than on nothing. */
+.studios {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.studio {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  color: color-mix(in srgb, var(--parchment) 46%, transparent);
+  font-size: clamp(9px, 1.1cqmin, 15px);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* the name is the empty place itself — the first card to land on it says the
+   same thing better, so the writing goes */
+.studio:not([data-held="0"]) { display: none; }
+
 .thread {
   position: absolute;
   left: 0;
@@ -76,6 +99,26 @@ html.rig, html.rig body { cursor: none; }
     0 7px 18px rgba(0, 0, 0, 0.3); /* contact shadow: laid object, not printed rectangle (D39) */
   will-change: transform, opacity; /* stay composited: no AA snap when motion starts */
 }
+
+/* Something is in hand: the rest of the table steps back so the read is the lit
+   thing. Brightness, not opacity — opacity is already how the table says age. */
+.card, .studio { transition: filter 220ms ease; }
+
+[data-reading] .card,
+[data-reading] .studio { filter: brightness(0.55); }
+
+[data-reading] .card[data-lit] { filter: none; }
+
+/* a work made with somebody else, visiting this studio's timeline: it belongs
+   here as much as anywhere, and the mark says it belongs elsewhere too */
+[data-reading] .card[data-shared] {
+  box-shadow:
+    0 0 0 1.5px rgba(196, 154, 88, 0.75),
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 7px 18px rgba(0, 0, 0, 0.3);
+}
+
+[data-reading] .thread { filter: brightness(0.5); } /* not opacity — the fold sets that inline */
 
 /* ---- the flip: the pivot turns, the card carries light and shadow (D73) ----
    opacity and shadow sit OUTSIDE the pivot — inside they'd flatten the 3D
@@ -198,14 +241,135 @@ html.rig, html.rig body { cursor: none; }
   color: var(--ink-muted);
 }
 
-.back__player {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: inherit;
+/* A recording plays where it lies (D147/D151), on the desk's own transport: a
+   mark to press and a thin amber line to travel — the same amber a thread is
+   drawn in. One line tall, so a sound takes no more of a back than a sentence. */
+.back__play { width: 100%; }
+
+.back__play audio { display: none; } /* the sound has no face; the bar is its face */
+
+.play__frame {
+  border-radius: 3px;
+  overflow: hidden;
+  background: #100d0a;
+  max-height: var(--piece-max, 12em);
 }
+
+.play__frame video { display: block; width: 100%; max-height: inherit; }
+
+.play__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  height: 1.5em;
+}
+
+/* Both marks are drawn, not typed: one box, one colour, one optical weight, so
+   the line beside them does not shift when the mark changes under a press. */
+.play__mark {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.16em;
+  width: 1em;
+  height: 0.85em;
+  cursor: pointer;
+  user-select: none;
+}
+
+.play__mark::before, .play__mark::after { content: ''; display: block; }
+
+.play__mark[data-mark="play"]::before {
+  width: 0;
+  height: 0;
+  margin-left: 0.12em; /* a triangle's optical centre is left of its bounding box */
+  border-left: 0.62em solid #6f5a33;
+  border-top: 0.38em solid transparent;
+  border-bottom: 0.38em solid transparent;
+}
+
+.play__mark[data-mark="play"]::after { display: none; }
+
+.play__mark[data-mark="pause"]::before,
+.play__mark[data-mark="pause"]::after {
+  width: 0.19em;
+  height: 0.72em;
+  border-radius: 0.5px;
+  background: #6f5a33;
+}
+
+.play__line {
+  flex: 1 1 auto;
+  height: 1.5px;
+  border-radius: 1px;
+  background: rgba(43, 36, 24, 0.2);
+  cursor: pointer;
+  position: relative;
+}
+
+.play__run {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-radius: inherit;
+  background: rgba(196, 154, 88, 0.9); /* --amber, as a thread is */
+}
+
+.play__at {
+  font-size: 0.55em;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums; /* the count must not jitter as it counts */
+  flex: none;
+}
+
+/* A quest is a question the room is holding open, not a work. It used to be
+   marked by being faded, and nothing on this table is faded now — so the words
+   carry it: set in the hand it was asked in. */
+.kind--quest .card__front { font-style: italic; }
+
+/* Whose card this is. Dimmer than the caption and set apart from it: the eye
+   finds the pile by it without reading it as part of the work's own words. */
+.card__by {
+  margin-top: 0.35em;
+  font-size: 0.6em;
+  line-height: 1.3;
+  letter-spacing: 0.03em;
+  color: color-mix(in srgb, var(--ink-muted) 82%, transparent);
+}
+
+.kind--failure .card__by { color: color-mix(in srgb, var(--ashen-ink) 88%, transparent); }
+
+/* What a register is for, said on hover. Not the browser's own tooltip: that
+   waits about a second before it appears, which is long enough that nobody who
+   is deciding between three words ever sees it. This one is immediate. */
+[data-means] { position: relative; }
+
+[data-means]::after {
+  content: attr(data-means);
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 0.5em);
+  z-index: 40;
+  width: max-content;
+  max-width: 22em;
+  padding: 0.35em 0.6em;
+  border-radius: 3px;
+  background: #221c14;
+  color: var(--parchment);
+  font-size: 0.82em;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 90ms ease 40ms; /* almost at once, but not on a passing cursor */
+}
+
+[data-means]:hover::after, [data-means]:focus-visible::after { opacity: 1; }
 
 /* ---- the ? on the table (D77, amended): tappable by any visitor ---- */
 
@@ -287,14 +451,6 @@ html.rig, html.rig body { cursor: none; }
   letter-spacing: 0.01em;
 }
 
-.card__caption {
-  margin-top: 0.3em;
-  font-size: 0.7em;
-  line-height: 1.35;
-  color: var(--ink-muted);
-  letter-spacing: 0.02em;
-}
-
 /* traces */
 
 .trace--sentence {
@@ -339,17 +495,13 @@ html.rig, html.rig body { cursor: none; }
 
 /* the fold's linework may run nearly full-bleed (§5) */
 .card--fold .card__front { padding: 0.35em; }
-.card--fold .card__title, .card--fold .card__caption { padding: 0 0.55em 0.35em; }
-
-/* the failure register: ashen, with its own dignity (§3); piled in Claude's
+.card--fold .card__title, .card--fold /* the failure register: ashen, with its own dignity (§3); piled in Claude's
    corner and stamped as its reject (D9 amended) */
 .kind--failure {
   background: var(--ashen);
   color: var(--ashen-ink);
 }
-.kind--failure .card__caption { color: rgba(80, 77, 71, 0.75); }
-
-.kind--failure .card__front { padding-top: 2.1em; } /* the stamp keeps its own band */
+.kind--failure .kind--failure .card__front { padding-top: 2.1em; } /* the stamp keeps its own band */
 
 /* "failure" printed horizontal; "Claude" stamped diagonally across it, its
    middle over the word's start — a stamp on print (D9). Set in the wordmark's
@@ -498,7 +650,7 @@ html.rig, html.rig body { cursor: none; }
   font-size: 0.92em;
 }
 
-/* the meta fields there are (D90): practice and the register, from the start */
+/* the one meta field there is (D90): the register, from the start */
 .sheet__meta { align-items: baseline; gap: 1em; }
 
 .sheet__flag { margin-left: auto; font-size: 0.88em; } /* the one flag, at the line's far right (D98) */
@@ -536,7 +688,31 @@ html.rig, html.rig body { cursor: none; }
 
 /* the editor's lines and widgets on the parchment (D96/D98) */
 
-.desk-title { font-size: 1.15em; letter-spacing: 0.01em; }
+/* the writing itself, at a reading measure and in the table's own hand */
+.editor .cm-content {
+  font-family: inherit;
+  font-size: 1.02em;
+  line-height: 1.5;
+  max-width: 34em;
+}
+
+/* a long work scrolls inside the page rather than pushing the sheet down the
+   screen — a poem carried in as a file can be a hundred lines */
+.editor .cm-scroller { max-height: 26em; }
+
+/* The page and the card should feel like one thing (keeper's ruling): what you
+   write IS the work, so it is set the way the card will set it — a reading
+   measure in the table's own serif — and the title stands apart from it rather
+   than merely bigger. So a poem pasted in looks like a poem while it is being
+   pasted, not like a form field. */
+.desk-title {
+  display: inline-block;
+  font-size: 1.24em;
+  line-height: 1.25;
+  letter-spacing: 0.005em;
+  padding-bottom: 0.12em;
+  border-bottom: 1px solid rgba(43, 36, 24, 0.16); /* a rule under a heading, as on paper */
+}
 
 .desk-mention { /* a name wears a quiet pill */
   color: #6f5a33;

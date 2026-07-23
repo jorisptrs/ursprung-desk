@@ -70,7 +70,7 @@ const VISITOR_KEYS = [
   ['→', 'next card — hold to rush', true],
   ['←', 'take cards back — hold to rush', true],
   ['r', 'clear the table', true],
-  ['enter / space', 'add your work', true], // a held space still rushes ahead (D99)
+  ['space or enter', 'add your work', true], // the + on the wood does the same (D91)
   ['?', 'this help', true],
 ];
 
@@ -118,7 +118,6 @@ export function attachHelper(field, { withKeys = false, deal = null, tail = fals
   if (tail) addRow('m', 'land the held tail', true);
 
   for (const [key, label, kbd] of GESTURES) addRow(key, label, kbd);
-  if (!withKeys) addRow('+', 'add your work', false); // the bottom-left door (D91) — named here, lived there
 
   const close = () => panel.classList.remove('open');
   const toggle = () => {
@@ -130,6 +129,13 @@ export function attachHelper(field, { withKeys = false, deal = null, tail = fals
     toggle();
   });
   panel.addEventListener('click', close);
+  // and anywhere else: a panel that will not go away when you look elsewhere is
+  // a panel you have to learn to dismiss. The button stops its own click, so
+  // this never fights the toggle.
+  addEventListener('click', (event) => {
+    if (event.target instanceof Element && event.target.closest('.keys, .keys-btn')) return;
+    close();
+  });
   addEventListener('keydown', (event) => {
     if (event.target instanceof Element && event.target.closest('input, textarea, select, .sheet')) return; // typing on the sheet is typing
     if (event.key === '?') toggle();

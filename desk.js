@@ -26,6 +26,12 @@ async function loadEvents() {
     const { specimenEvents } = await import('./js/specimens.js');
     return specimenEvents;
   }
+  // ?castle: dev-only crowd surface — the table at the density the retreat
+  // actually reaches, where the old scatter's legibility failure was measured.
+  if (params.has('castle')) {
+    const { castleEvents } = await import('./js/castle.js');
+    return castleEvents;
+  }
   const res = await fetch('seed.json');
   return (await res.json()).events;
 }
@@ -172,9 +178,23 @@ async function main() {
   field.addEventListener('click', (event) => {
     if (event.target.closest('a')) return; // shelved links behave as links
     const cardEl = event.target.closest('.card');
-    if (!cardEl?.dataset.id) return; // empty table is pointer territory (below)
+    // A tap on the wood steps back one thing at a time (keeper's ruling): the
+    // card in hand goes down first, into the pile it came out of if that pile is
+    // still spread; only once nothing is in hand does the next tap shut the
+    // pile. Undoing two things with one tap is how you lose the place you were
+    // reading from.
+    if (!cardEl?.dataset.id) {
+      const held = view.inHand();
+      if (held != null) { queue.push({ run: view.flipJob(held), maxMs: 1800 }); return; }
+      view.spreadPile(null);
+      return; // and past that, the empty table is pointer territory (below)
+    }
     const sel = getSelection();
     if (pressDrag || (sel && !sel.isCollapsed)) return; // marking text to copy keeps the card as it is
+    if (event.target.closest('[data-plays]')) { // working a player is not putting the card down
+      view.workPlayer(event.target);
+      return;
+    }
     const pageEl = event.target.closest('[data-page]'); // turning a leaf is not putting the card down (D100)
     if (pageEl) {
       view.pageBack(cardEl.dataset.id, pageEl.dataset.page);
@@ -185,6 +205,7 @@ async function main() {
       view.tapDoor(cardEl.dataset.id, doorEl);
       return;
     }
+    if (view.spreadPile(cardEl.dataset.id)) return; // a pile opens before any card in it is read
     if (!cardEl.classList.contains('card--backed')) return;
     queue.push({ run: view.flipJob(cardEl.dataset.id), maxMs: 1800 }); // exchange + slack
   });
@@ -205,6 +226,7 @@ async function main() {
   field.addEventListener('pointerdown', (event) => {
     if (rig || event.button !== 0) return;
     if (event.target.closest('.card, a, .keys-btn, .add-btn')) return;
+    if (view.pileOpen() || view.inHand() != null) return; // the press that steps back does not also step the stream
     startScrub('step');
   });
   addEventListener('pointerup', stopScrub);

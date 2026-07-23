@@ -30,6 +30,7 @@ export function createStream() {
   const events = [];
   const artifacts = new Map();
   const listeners = [];
+  let highestNight = 0;
 
   function validate(event) {
     if (!event || typeof event !== 'object') reject('event must be an object');
@@ -48,9 +49,6 @@ export function createStream() {
       if (!isFilled(a.title) && !isFilled(a.caption) && !isFilled(a.excerpt?.text)) {
         reject('a card needs a title, a caption, or a line of its own');
       }
-      // D17 amended 2026-07-22: practice is optional at the door — the seed and
-      // the curator still fill it; if present it must carry a word.
-      if (a.practice !== undefined && !isFilled(a.practice)) reject('practice, if present, must be a non-empty string');
       if (!PROVENANCES.includes(a.provenance)) reject(`unknown provenance "${a.provenance}"`);
       if (!VISIBILITIES.includes(a.visibility)) reject(`unknown visibility "${a.visibility}"`);
       if (!a.excerpt || typeof a.excerpt !== 'object') reject('artifact needs an excerpt — it is the surface');
@@ -91,6 +89,52 @@ export function createStream() {
       return;
     }
 
+    // Which night it is. Everything else the desk works out for itself — an id
+    // from the log, a place from the arrangement — but no amount of reading the
+    // log tells you that yesterday ended, so somebody says so and the log
+    // records it like any other fact. It may only ever move forward: a night
+    // that went backwards would re-date every card laid after it.
+    if (event.e === 'night') {
+      if (event.night <= highestNight) {
+        reject(highestNight === 0 && event.night === 0
+          ? 'night 0 is where the log starts — the first night to begin is night 1'
+          : `it is already night ${highestNight}`);
+      }
+      return;
+    }
+
+    // The cohort. The curator registers people before anyone deposits anything,
+    // and the table opens as a room of named empty places rather than as a void
+    // that fills — which is also what gives a thread from a shared work
+    // somewhere to land when one of its makers has laid nothing alone. It is an
+    // ordinary appended fact, so replay walks it like everything else, and it
+    // accumulates: a later roster adds people, it never unmakes them.
+    if (event.e === 'roster') {
+      if (!Array.isArray(event.people) || !event.people.length) reject('a roster with nobody in it is not a roster');
+      if (!event.people.every(isFilled)) reject('every place on the roster belongs to a name');
+      return;
+    }
+
+    // Where each studio stands tonight. The arrangement is judged elsewhere —
+    // by whoever or whatever read the work — and enters here as an ordinary
+    // appended fact, so `fold` stays a pure function of the log and replay can
+    // still walk the four days. Arrangements accumulate: a night that moves three
+    // studios names only those three, and everyone else keeps the place they had.
+    if (event.e === 'arrange') {
+      const places = event.places;
+      if (!places || typeof places !== 'object' || Array.isArray(places)) reject('an arrangement is a set of places');
+      const names = Object.keys(places);
+      if (!names.length) reject('an arrangement with nobody in it places nothing');
+      for (const name of names) {
+        if (!isFilled(name)) reject('a place belongs to a name');
+        const at = places[name];
+        if (!Array.isArray(at) || at.length !== 2) reject(`${name}'s place is an x and a y`);
+        if (!at.every((n) => Number.isFinite(n) && n >= 0 && n <= 1)) reject(`${name}'s place lies off the table`);
+      }
+      if (event.why !== undefined && !isFilled(event.why)) reject('why, if present, must say something');
+      return;
+    }
+
     reject(`unknown event type "${event.e}"`);
   }
 
@@ -98,6 +142,7 @@ export function createStream() {
     validate(event);
     events.push(event);
     if (event.e === 'deposit') artifacts.set(event.artifact.id, event.artifact);
+    if (event.night > highestNight) highestNight = event.night;
     for (const fn of listeners) fn(event);
     return event;
   }
