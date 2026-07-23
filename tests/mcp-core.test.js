@@ -19,8 +19,8 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const SEED = {
   events: [
-    { e: 'deposit', night: 0, artifact: { id: 'a-001', media: 'note', kind: 'quest', title: 'a fold that will not close', practice: 'origami', people: ['R.'], provenance: 'curator', visibility: 'public', excerpt: { form: 'words', text: 'a fold that will not close' } } },
-    { e: 'deposit', night: 2, artifact: { id: 'a-002', media: 'note', kind: 'meta', title: 'the desk, v0', practice: 'cartography', people: ['J.', 'Claude'], provenance: 'curator', visibility: 'public', excerpt: { form: 'words', text: 'the desk, v0' } } },
+    { e: 'deposit', night: 0, artifact: { id: 'a-001', media: 'note', kind: 'quest', title: 'a fold that will not close', people: ['R.'], provenance: 'curator', visibility: 'public', excerpt: { form: 'words', text: 'a fold that will not close' } } },
+    { e: 'deposit', night: 2, artifact: { id: 'a-002', media: 'note', kind: 'meta', title: 'the desk, v0', people: ['J.', 'Claude'], provenance: 'curator', visibility: 'public', excerpt: { form: 'words', text: 'the desk, v0' } } },
   ],
 };
 
@@ -48,8 +48,7 @@ test('a confirmed card lands: m-001, the highest night, one line, the still copi
   const { root, still } = fixture();
   const r = depositCard({
     media: 'image', kind: 'work', title: 'the fold, closed',
-    caption: 'paper · R. + Claude', people: ['R.', 'Claude'], practice: 'origami',
-    excerpt: { path: still },
+    caption: 'paper · R. + Claude', people: ['R.', 'Claude'],     excerpt: { path: still },
   }, { root });
 
   assert.equal(r.id, 'm-001');
@@ -222,12 +221,10 @@ test('buildArtifact keeps only what was given; the door fills its own two', () =
   assert.equal(named.caption, 'B.', 'the author stands on the front (D88)');
   const stated = buildArtifact({ media: 'note', kind: 'work', title: 'x', people: ['B.'], caption: 'audio · B.' });
   assert.equal(stated.caption, 'audio · B.', 'a written caption is never overwritten');
-  assert.ok(!('practice' in a), 'practice is optional at the door (D95)');
   assert.ok(!('caption' in a) && !('people' in a) && !('detail' in a));
-  const full = buildArtifact({ media: 'text', kind: 'quest', title: 'x', caption: 'c', people: ['E.'], practice: 'manuscript', excerpt: { text: 's' }, detail: { note: 'n' } });
+  const full = buildArtifact({ media: 'text', kind: 'quest', title: 'x', caption: 'c', people: ['E.'], excerpt: { text: 's' }, detail: { note: 'n' } });
   assert.equal(full.caption, 'c');
   assert.deepEqual(full.people, ['E.']);
-  assert.equal(full.practice, 'manuscript');
   assert.deepEqual(full.excerpt, { form: 'sentence', text: 's' });
   assert.deepEqual(full.detail, { note: 'n' });
   assert.equal(buildArtifact({ media: 'note', kind: 'work', people: ['R.'], title: 'x', detail: {} }).detail, undefined, 'an empty back is no back (D5)');

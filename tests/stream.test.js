@@ -10,8 +10,7 @@ function artifact(overrides = {}) {
     media: 'text',
     kind: 'work',
     title: 'a placeholder',
-    practice: 'manuscript',
-    people: ['E.'],
+        people: ['E.'],
     provenance: 'curator',
     visibility: 'public',
     excerpt: { form: 'sentence', text: 'one line' },
@@ -84,12 +83,6 @@ test('rejects a duplicate id', () => {
   assert.throws(() => s.append(deposit()), /duplicate id/);
 });
 
-test('practice is optional at the door, but never an empty word (D17 amended)', () => {
-  const s = createStream();
-  s.append(deposit({ practice: undefined }));
-  assert.throws(() => s.append(deposit({ id: 'a-002', practice: '' })), /practice/);
-});
-
 test('rejects retirement of an unknown artifact', () => {
   const s = createStream();
   assert.throws(() => s.append({ e: 'retire', night: 1, id: 'a-404' }), /unknown artifact/);
@@ -142,8 +135,6 @@ test('blank is not filled: whitespace never stands in for a word (D128)', () => 
     /a card needs a title, a caption, or a line of its own/);
   // nor is an author of one space an author
   assert.throws(() => s.append({ e: 'deposit', night: 0, artifact: artifact({ people: ['  '] }) }), /people must be strings/);
-  // and a blank practice is the same as none stated, which the stream refuses to call a practice
-  assert.throws(() => s.append({ e: 'deposit', night: 0, artifact: artifact({ practice: ' ' }) }), /practice, if present/);
 });
 
 test('a back is an object — an array is not one (D128)', () => {

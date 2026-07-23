@@ -287,9 +287,9 @@ export function parseDoc(docText, pieces = new Map(), linkMeta = new Map()) {
 }
 
 // The whole sheet → one artifact: parse, then the untouched composition.
-export function composeDoc({ docText = '', pieces = new Map(), linkMeta = new Map(), kind = 'work', practice = '', frontPieceId = null, roster = [] }) {
+export function composeDoc({ docText = '', pieces = new Map(), linkMeta = new Map(), kind = 'work', frontPieceId = null, roster = [] }) {
   const { blocks, unknownRefs } = parseDoc(docText, pieces, linkMeta);
-  const out = composeArtifact({ kind, practice, blocks, frontPieceId, frontTextId: null, roster });
+  const out = composeArtifact({ kind, blocks, frontPieceId, frontTextId: null, roster });
   return { ...out, unknownRefs };
 }
 
@@ -360,7 +360,6 @@ export function migrateSheet(s = {}) {
       v: 3,
       docText: String(s.docText ?? ''),
       kind: s.kind ?? 'work',
-      practice: s.practice ?? '',
       frontPieceId: s.frontPieceId ?? null,
       pieces: (s.pieces ?? []).map((p) => ({ ...p })),
       linkMeta: { ...(s.linkMeta ?? {}) },
@@ -390,7 +389,6 @@ export function migrateSheet(s = {}) {
     v: 3,
     docText: parts.join('\n\n'),
     kind: s.kind ?? 'work',
-    practice: s.practice ?? '',
     frontPieceId: s.frontPieceId ?? null,
     pieces,
     linkMeta: {},
@@ -427,7 +425,7 @@ export function resolveFront({ title = '', blocks = [], frontPieceId = null, fro
   return { piece, textBlock }; // textBlock null → the title (if any) is the front's text
 }
 
-export function composeArtifact({ practice = '', kind = 'work', blocks: rawBlocks = [], frontPieceId = null, frontTextId = null, roster = [] }) {
+export function composeArtifact({ kind = 'work', blocks: rawBlocks = [], frontPieceId = null, frontTextId = null, roster = [] }) {
   const { title, blocks } = extractTitle(rawBlocks);
   const { piece, textBlock } = resolveFront({ title, blocks, frontPieceId, frontTextId });
   const frontText = textBlock ? textBlock.text.trim() : title.trim();
@@ -438,8 +436,6 @@ export function composeArtifact({ practice = '', kind = 'work', blocks: rawBlock
     provenance: 'hand',
     visibility: 'public',
   };
-  const craft = practice.trim();
-  if (craft) artifact.practice = craft; // optional at the door (D17 amended)
 
   if (piece) {
     artifact.media = piece.p.kind === 'link' ? (piece.p.media ?? 'image') : piece.p.kind;
@@ -881,9 +877,8 @@ export function openSheet({
   panel.append(head);
 
   // The register is its own field (D90): work · quest — and at the line's far
-  // right, the one flag there is (D98). Flagging Claude's failure is the only
-  // moment practice exists, and there it is required: the honest record is
-  // kept by craft.
+  // right, the one flag there is (D98). The flag asks nothing further of
+  // anyone now: what craft a work belongs to is read from the work itself.
   const kindRow = h('div', 'sheet__row sheet__meta');
   kindRow.append(h('span', 'sheet__label', 'enters as'));
   const kindEls = new Map();
@@ -898,16 +893,10 @@ export function openSheet({
     state.kind = state.kind === 'failure' ? 'work' : 'failure';
     syncMeta();
     refreshPreviews();
-    if (state.kind === 'failure') practice.focus();
   });
   kindRow.append(flag);
-  const practiceRow = h('div', 'sheet__row sheet__meta');
-  practiceRow.style.display = 'none';
-  const practice = h('input', 'sheet__field');
-  practice.placeholder = 'origami, composition, writing...';
-  practiceRow.append(h('span', 'sheet__label', 'practice'), practice);
   const editorBox = h('div', 'editor');
-  panel.append(kindRow, practiceRow, editorBox);
+  panel.append(kindRow, editorBox);
 
   const previews = h('div', 'sheet__previews');
   const frontBox = h('figure', 'sheet__face');
@@ -960,7 +949,6 @@ export function openSheet({
   function syncMeta() {
     for (const [k, opt] of kindEls) opt.classList.toggle('sheet__opt--on', state.kind === k);
     flag.classList.toggle('sheet__opt--on', state.kind === 'failure');
-    practiceRow.style.display = state.kind === 'failure' ? '' : 'none';
   }
 
   // -- the composition → the one front face --
@@ -970,7 +958,6 @@ export function openSheet({
     pieces: state.registry,
     linkMeta: state.linkMeta,
     kind: state.kind,
-    practice: practice.value,
     frontPieceId: state.frontPieceId,
     roster: people, // a name the room knows is read whole, spaces and all
   });
@@ -1148,8 +1135,7 @@ export function openSheet({
       v: 3,
       docText: state.docText,
       kind: state.kind,
-      practice: practice.value,
-      frontPieceId: state.frontPieceId,
+        frontPieceId: state.frontPieceId,
       linkMeta,
       pieces: referenced.map((b) => {
         const p = state.registry.get(b.id);
@@ -1170,7 +1156,6 @@ export function openSheet({
     state.linkMeta.clear();
     state.frontPieceId = null;
     state.editingId = null;
-    practice.value = '';
     if (ed) ed.setText(state.docText, { caretAt: 0 }); // the pen waits above the signature
     syncMeta();
     refreshPreviews();
@@ -1182,7 +1167,6 @@ export function openSheet({
     state.editingId = entry.id;
     state.kind = mapped.kind;
     state.frontPieceId = mapped.frontPieceId;
-    practice.value = mapped.practice;
     for (const [href, m] of Object.entries(mapped.linkMeta ?? {})) state.linkMeta.set(href, { status: 'done', ...m });
     state.docText = mapped.docText;
     for (const sp of mapped.pieces) {
@@ -1265,12 +1249,6 @@ export function openSheet({
     stack.style.setProperty('--open-h', `${maxY * 2 * spreadY + tallest + 12}px`);
   }
 
-  // The door's own rule, applied to a card nobody is holding (D99/D101).
-  const namelessFailure = (entry) =>
-    (entry.artifact?.kind === 'failure' && !entry.artifact.practice
-      ? 'a flagged failure names its practice'
-      : null);
-
   async function pickUp(entry) {
     if (entry.sheet) { loadEntry(entry); return; }
     // staged before this editor: it cannot reopen — one tap pushes it as it is
@@ -1298,8 +1276,7 @@ export function openSheet({
     return true;
   }
 
-  // the drawer holds unfinished work without questions — the practice guard
-  // stands at the push, where a card actually reaches the table (D99)
+  // the drawer holds unfinished work without questions
   aside.addEventListener('click', async () => {
     if (!hasAnything()) { say('write, drop, or paste something first'); return; }
     await stash();
@@ -1307,11 +1284,6 @@ export function openSheet({
 
   push.addEventListener('click', async () => {
     if (!hasAnything()) { say('write, drop, or paste something first'); return; }
-    if (state.kind === 'failure' && !practice.value.trim()) {
-      say('a flagged failure names its practice · origami, composition, writing...');
-      practice.focus();
-      return;
-    }
     const { artifact, blobs } = current();
     const probe = validateArtifact(materialize(artifact, blobs, () => 'blob:probe'));
     if (probe) { say(probe); return; }
@@ -1345,7 +1317,7 @@ export function openSheet({
     const entries = await tray.list();
     if (!entries.length) { say('the deck is empty'); return; }
     pushAll.classList.add('sheet__push--busy');
-    const { laid, rejected } = await tray.commit(sink, namelessFailure);
+    const { laid, rejected } = await tray.commit(sink);
     pushAll.classList.remove('sheet__push--busy');
     await refreshDeck();
     if (rejected.length) {
