@@ -24,7 +24,7 @@ import { dirname, join } from 'node:path';
 
 import QRCode from 'qrcode';
 
-import { ROOT } from './core.mjs';
+import { ROOT, appendEvent } from './core.mjs';
 import { DEFAULT_PORT, peopleFileIn, readPeople, writePeople, sameName } from './room.mjs';
 
 const root = process.env.DESK_ROOT || ROOT;
@@ -54,7 +54,13 @@ function add(name) {
   }
   people.push({ name: name.trim(), tokens: [], claimedAt: null });
   writePeople(root, people);
-  say(`${name.trim()} · in the cohort`);
+  // The table opens as a room of named empty places rather than a void that
+  // fills, so registering someone puts their name on the wood at once — and a
+  // shared work then has both its ends to hang from, even before either maker
+  // has laid anything alone. drop/people.json never leaves this machine; the
+  // roster event carries only the names, which the table shows anyway.
+  appendEvent(root, { e: 'roster', night: 0, people: [name.trim()] });
+  say(`${name.trim()} · in the cohort, and a place on the table`);
   say(`  they scan the room's code and tap their name — nothing to hand over`);
 }
 

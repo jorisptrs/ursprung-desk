@@ -9,40 +9,26 @@
 // drawn.
 
 import { humansOf, CLAUDE } from './affinity.js';
+import { TABLE_ASPECT, clamp, round4, fnv1a, mulberry32 } from './geom.js';
+import { arrange } from './layout.js';
 
 export const SPACING = 1; // table-time units between consecutive events (D25)
 export const eventTime = (i) => (i + 1) * SPACING;
 export const pastEnd = (events) => eventTime(events.length - 1) + SPACING;
 
-export const TABLE_ASPECT = 1.6; // canonical table proportions; the renderer maps 0–1 onto its own rect (Q33 open)
+// the primitives live in geom.js so the fold may call the solver (see there)
+export { TABLE_ASPECT, fnv1a, mulberry32 } from './geom.js';
 
-const STRATUM_DIM = 0.1; // older material sinks per night…
-const STRATUM_FLOOR = 0.7; // …but never below reading light (eye-tuned ×2 2026-07-22)
+// D14 is retired (keeper's ruling): nothing on this table is translucent. A card
+// lies at full strength however old it is, and an opened pile is one brightness
+// throughout. `stratum` stays — it is a true fact about the log — but it no
+// longer reaches the light. What is being read is marked by dimming everything
+// else (D149), which is one meaning on one channel instead of two.
 const SCALES = { image: 1.15, video: 1.15, fold: 1.05, note: 0.8 }; // §5: subtle, nothing shouts
 
 export const CARD_W = 0.24; // of the canonical short side, before scale — mirrors the renderer's sizing
 export const NOMINAL_H = { image: 1.05, video: 0.85, model: 0.9, fold: 1.0, audio: 0.65, text: 0.85, code: 0.85, note: 0.42 };
 
-export function fnv1a(str) {
-  let h = 0x811c9dc5;
-  for (const c of str) {
-    h ^= c.codePointAt(0);
-    h = Math.imul(h, 0x01000193) >>> 0;
-  }
-  return h >>> 0;
-}
-
-export function mulberry32(a) {
-  return function () {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-const round4 = (v) => Math.round(v * 10000) / 10000;
 
 // ---- overlap model (canonical units: table is TABLE_ASPECT × 1) ----
 
@@ -83,6 +69,12 @@ export function captionStrip(card) {
 // when touched, which is where reading was always going to happen.
 const PILE_SCALE = 0.55; // ~143px on a 1080p projection — above the D66 floor
 const FLOAT_SCALE = 0.4; // a mark between two studios, read by opening it
+// What it costs to place a stack the arrangement has not heard of yet — a
+// person's first card, or the first work two hands made together. Fewer steps
+// than a night's redraw and a tight drift cap, because this is a newcomer
+// finding room among stacks that are already right, not the room being redrawn.
+const SETTLE_STEPS = 120;
+const SETTLE_DRIFT = 0.07;
 const PILE_SHOWS = 4; // past the fourth, a pile is just a pile — never a tally of output
 const PILE_STEP_X = 0.006; // the cascade of one pile, in canonical units
 const PILE_STEP_Y = 0.008;
@@ -91,65 +83,9 @@ const PILE_STEP_Y = 0.008;
 // the threads land, and where the next card arrives.
 const cascade = (d, held) => Math.min(d, PILE_SHOWS - 1) - (Math.min(held, PILE_SHOWS) - 1) / 2;
 
-// A shared work is settled off the studios rather than dropped on the midpoint
-// between its makers — that midpoint is very often exactly where somebody else
-// is standing. Deterministic: a fixed number of steps, a hashed direction to
-// break ties, no randomness.
-// Measured on the castle table (?castle: 25 people, 101 cards, 27 shared
-// works): 60 steps at 0.045 left 34 covered caption strips, 240 at 0.065 leaves
-// 16. Clearance is bought with distance — the shared work is pushed further from
-// the hands that made it, so its threads run longer. Capping that drift was
-// tried and is worse on both counts (57 covered at a 0.16 cap), because 26
-// studios and 19 shared places genuinely need the whole table.
-const FLOAT_STEPS = 240;
-const FLOAT_CLEAR = 0.065; // canonical gap it tries to keep from anything else
 
-function settleFloats(floats, fixed) {
-  for (let step = 0; step < FLOAT_STEPS; step++) {
-    let moved = false;
-    for (const f of floats) {
-      let vx = 0;
-      let vy = 0;
-      const push = (ox, oy, need) => {
-        const dx = f.cx - ox;
-        const dy = f.cy - oy;
-        const d = Math.hypot(dx, dy);
-        if (d >= need) return;
-        if (d < 1e-6) { // exactly on top: part along a settled direction
-          const a = ((fnv1a(f.key) % 360) * Math.PI) / 180;
-          vx += Math.cos(a) * need;
-          vy += Math.sin(a) * need;
-          moved = true;
-          return;
-        }
-        vx += (dx / d) * (need - d) * 0.5;
-        vy += (dy / d) * (need - d) * 0.5;
-        moved = true;
-      };
-      for (const o of fixed) push(o.cx, o.cy, o.need + f.need);
-      for (const o of floats) if (o !== f) push(o.cx, o.cy, o.need + f.need);
-      // and it never strays far from the people who made it
-      const dx = f.homeX - f.cx;
-      const dy = f.homeY - f.cy;
-      vx += dx * 0.06;
-      vy += dy * 0.06;
-      f.cx = clamp(f.cx + vx, 0.05 * TABLE_ASPECT, TABLE_ASPECT - 0.05 * TABLE_ASPECT);
-      f.cy = clamp(f.cy + vy, 0.05, 0.95);
-    }
-    if (!moved) break;
-  }
-}
 
 // Where a person stands when no arrangement has named them yet.
-function fallbackPlace(name, index, total) {
-  const rng = mulberry32(fnv1a(`${name}:studio`));
-  const a = index * 2.399963229728653; // golden angle: a room, not a queue
-  const r = 0.42 * Math.sqrt((index + 0.5) / Math.max(1, total));
-  return [
-    clamp(0.5 + r * Math.cos(a) + (rng() - 0.5) * 0.04, 0.09, 0.91),
-    clamp(0.5 + r * Math.sin(a) + (rng() - 0.5) * 0.04, 0.09, 0.91),
-  ];
-}
 
 export function fold(events, t) {
   const arrived = [];
@@ -162,12 +98,20 @@ export function fold(events, t) {
   const live = [];
   let maxNight = 0;
   let places = null; // the latest arrangement at or before t
+  const enrolled = []; // the cohort the curator registered, in the order they were
   for (const { ev, i } of arrived) {
     if (Number.isInteger(ev.night) && ev.night > maxNight) maxNight = ev.night;
     if (ev.e === 'arrange') {
       // arrangements accumulate: a night that moves three studios says only
       // those three, and everyone else keeps the place they already had
       places = { ...places, ...ev.places };
+      continue;
+    }
+    if (ev.e === 'roster') {
+      for (const name of ev.people) {
+        const clean = String(name).trim();
+        if (clean && !enrolled.includes(clean)) enrolled.push(clean);
+      }
       continue;
     }
     if (ev.e === 'retire') {
@@ -193,18 +137,50 @@ export function fold(events, t) {
   // gets one, not only those who deposited alone: someone whose whole week is
   // collaborations still has a studio, and a floating work needs both its ends
   // to have somewhere to hang from.
-  const studios = [];
+  // Everyone the curator registered stands here from the first moment, in the
+  // order they were registered; the log's own names follow.
+  const studios = [...enrolled];
   for (const c of live) {
     for (const name of c.makers) if (!studios.includes(name)) studios.push(name);
     if (!c.makers.length && !studios.includes(CLAUDE)) studios.push(CLAUDE);
   }
-  const at = new Map();
-  studios.forEach((name, i) => {
-    const said = places?.[name];
-    at.set(name, Array.isArray(said) && said.length === 2 && said.every(Number.isFinite)
-      ? [clamp(said[0], 0.06, 0.94), clamp(said[1], 0.06, 0.94)]
-      : fallbackPlace(name, i, studios.length));
-  });
+  // Every stack on the table, before any of them is placed: a studio for each
+  // person, and one shared place for each set of hands that worked together.
+  const floats = new Map(); // maker-set → the shared works of those hands
+  for (const c of live) {
+    if (c.pile) continue;
+    const key = [...c.makers].sort().join(' + ');
+    c.between = key;
+    if (!floats.has(key)) floats.set(key, { of: [...c.makers].sort(), group: [] });
+    floats.get(key).group.push(c);
+  }
+  const stacks = [
+    ...studios,
+    ...[...floats.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([key, f]) => ({ key, of: f.of })),
+  ];
+
+  // Where each stands. The arrangement in the log is authoritative for every
+  // stack it names; a stack it does not name is one that came into existence
+  // since — a person's first card, or the first work two hands made together —
+  // and the same solver places it among the others, seeded from where they
+  // already are. So a new stack costs a small rearrangement and another card on
+  // a pile that already stands costs nothing at all: the room was reserved when
+  // the stack began, and the fold's input has not changed.
+  const stated = {};
+  for (const stack of stacks) {
+    const key = typeof stack === 'string' ? stack : stack.key;
+    const said = places?.[key];
+    if (Array.isArray(said) && said.length === 2 && said.every(Number.isFinite)) {
+      stated[key] = [clamp(said[0], 0.06, 0.94), clamp(said[1], 0.06, 0.94)];
+    }
+  }
+  const settled = stacks.length && stacks.length > Object.keys(stated).length
+    ? arrange(stacks, [], stated, { steps: SETTLE_STEPS, drift: SETTLE_DRIFT, seed: 'stable' })
+    : stated;
+  const at = new Map(stacks.map((stack) => {
+    const key = typeof stack === 'string' ? stack : stack.key;
+    return [key, settled[key] ?? stated[key] ?? [0.5, 0.5]];
+  }));
 
   // How deep each pile ends up, counted before anything is placed, so the
   // cascade can be centred on the studio rather than trailing off it.
@@ -217,62 +193,26 @@ export function fold(events, t) {
   // reason: two people who keep working together make one place between them,
   // not a drift of separate cards.
   const depth = new Map();
-  const floats = new Map(); // maker-set → the shared works of those hands
   for (const c of live) {
     const rng = mulberry32(fnv1a(c.id));
     c.rot = round4((rng() - 0.5) * 7);
-    c.baseOpacity = c.artifact.kind === 'quest' ? 0.62 : 1;
-
-    if (c.pile) {
-      c.scale = (SCALES[c.artifact.media] ?? 1) * PILE_SCALE;
-      const d = depth.get(c.pile) ?? 0;
-      depth.set(c.pile, d + 1);
-      c.depth = d;
-      const shown = cascade(d, held.get(c.pile) ?? 1);
-      const [px, py] = at.get(c.pile);
-      c.x = clamp(px + shown * PILE_STEP_X, 0.05, 0.95);
-      c.y = clamp(py - shown * PILE_STEP_Y, 0.05, 0.95);
-      c.buried = d >= PILE_SHOWS;
-      continue;
-    }
-    c.scale = (SCALES[c.artifact.media] ?? 1) * FLOAT_SCALE;
-    const key = [...c.makers].sort().join('+');
-    c.between = key;
-    if (!floats.has(key)) floats.set(key, []);
-    floats.get(key).push(c);
-  }
-
-  // Where each shared pile settles: it starts between the hands that made it,
-  // then is pushed clear of the studios and of the other shared piles.
-  const half = (s) => (CARD_W * s * 0.5 + FLOAT_CLEAR);
-  const fixed = studios.map((name) => {
-    const [x, y] = at.get(name);
-    return { cx: x * TABLE_ASPECT, cy: y, need: half(PILE_SCALE * 1.15) };
-  });
-  const nodes = [...floats.entries()].map(([key, group]) => {
-    const anchors = group[0].makers.filter((m) => at.has(m));
-    const hx = anchors.length ? anchors.reduce((s, m) => s + at.get(m)[0], 0) / anchors.length : 0.5;
-    const hy = anchors.length ? anchors.reduce((s, m) => s + at.get(m)[1], 0) / anchors.length : 0.5;
-    return { key, group, homeX: hx * TABLE_ASPECT, homeY: hy, cx: hx * TABLE_ASPECT, cy: hy, need: half(FLOAT_SCALE * 1.15) };
-  }).sort((a, b) => a.key.localeCompare(b.key)); // a settled order, so the settle is settled
-  settleFloats(nodes, fixed);
-
-  for (const n of nodes) {
-    n.group.forEach((c, d) => {
-      c.depth = d;
-      const shown = cascade(d, n.group.length);
-      c.x = clamp(n.cx / TABLE_ASPECT + shown * PILE_STEP_X, 0.05, 0.95);
-      c.y = clamp(n.cy - shown * PILE_STEP_Y, 0.05, 0.95);
-      c.buried = d >= PILE_SHOWS;
-    });
+    const key = c.pile ?? c.between;
+    c.scale = (SCALES[c.artifact.media] ?? 1) * (c.pile ? PILE_SCALE : FLOAT_SCALE);
+    const d = depth.get(key) ?? 0;
+    depth.set(key, d + 1);
+    c.depth = d;
+    const total = c.pile ? (held.get(key) ?? 1) : floats.get(key).group.length;
+    const shown = cascade(d, total);
+    const [px, py] = at.get(key);
+    c.x = clamp(px + shown * PILE_STEP_X, 0.05, 0.95);
+    c.y = clamp(py - shown * PILE_STEP_Y, 0.05, 0.95);
+    c.buried = d >= PILE_SHOWS;
   }
 
   const cards = live;
   for (const c of cards) {
-    const stratum = maxNight - c.night;
-    c.stratum = stratum;
-    c.opacity = round4(c.baseOpacity * Math.max(STRATUM_FLOOR, 1 - stratum * STRATUM_DIM));
-    delete c.baseOpacity;
+    c.stratum = maxNight - c.night;
+    c.opacity = 1;
     c.x = round4(c.x);
     c.y = round4(c.y);
   }
@@ -282,8 +222,8 @@ export function fold(events, t) {
   // at rest: without them the card is an orphan in a gap. Every other thread
   // waits for its card to be picked up.
   const anchorThreads = [];
-  for (const n of nodes) {
-    const top = n.group[0];
+  for (const { group } of floats.values()) {
+    const top = group[0];
     for (const m of top.makers) {
       if (!at.has(m)) continue;
       const [x, y] = at.get(m);
@@ -303,5 +243,8 @@ export function fold(events, t) {
     }));
 
   const studioList = studios.map((name) => ({ name, place: at.get(name).map(round4), held: depth.get(name) ?? 0 }));
-  return { t, maxNight, cards, studios: studioList, threads: [...anchorThreads, ...threads] };
+  // where every stack stands — studios and shared places alike — so the next
+  // arrangement can be seeded from this one rather than from nothing
+  const stackPlaces = Object.fromEntries([...at].map(([key, p]) => [key, p.map(round4)]));
+  return { t, maxNight, cards, studios: studioList, places: stackPlaces, threads: [...anchorThreads, ...threads] };
 }

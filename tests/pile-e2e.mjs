@@ -163,17 +163,24 @@ async function main() {
   ok(await evalIn("document.getElementById('field').hasAttribute('data-reading')"),
     'and the table stepped back around the card in hand');
 
-  // a recording plays where it lies rather than fetching a file (D147)
+  // a recording plays where it lies rather than fetching a file (D147), on the
+  // desk's own transport rather than the browser's (D151)
   const sound = await evalIn(`(() => {
     for (const el of document.querySelectorAll('.card--backed')) {
-      const p = el.querySelector('audio[data-plays], video[data-plays]');
-      if (p) return { id: el.dataset.id, tag: p.tagName, controls: p.controls, src: p.getAttribute('src'),
-                      links: [...el.querySelectorAll('.back__line')].map((a) => a.getAttribute('href')) };
+      const wrap = el.querySelector('[data-plays]');
+      const media = wrap?.querySelector('audio, video');
+      if (!media) continue;
+      return { id: el.dataset.id, tag: media.tagName, src: media.getAttribute('src'),
+               mark: wrap.querySelector('[data-mark]')?.textContent,
+               seek: !!wrap.querySelector('[data-seek]'),
+               native: media.controls,
+               links: [...el.querySelectorAll('.back__line')].map((a) => a.getAttribute('href')) };
     }
     return null;
   })()`);
   ok(sound, `a recording is a player on the back (${sound?.tag ?? 'none found'})`);
-  ok(sound?.controls, 'with a transport anyone can work');
+  ok(sound?.mark === '▶' && sound?.seek, 'with a mark to press and a line to travel');
+  ok(!sound?.native, 'and none of the browser’s own chrome on the parchment');
   ok(!(sound?.links ?? []).some((h) => /\.(m4a|mp3|wav|mp4|mov|webm)$/i.test(h ?? '')),
     'and no line beside it that would fetch the same file instead');
 

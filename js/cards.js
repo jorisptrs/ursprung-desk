@@ -1,7 +1,7 @@
 // Artifact → card. The only module that knows what an artifact looks like (invariant 4).
 // The desk attests; it never performs: every trace is a still, text is textContent, never markup.
 
-import { fnv1a, mulberry32 } from './fold.js';
+import { fnv1a, mulberry32 } from './geom.js';
 import { isPlace } from './stream.js';
 
 // Every sheet's corners are cut a little differently. Deterministic per card (D24):
@@ -127,21 +127,55 @@ export function playsAs(src, { kind = null, name = null } = {}) {
 }
 export const playable = (src, hints) => playsAs(src, hints) !== null;
 
-// A player on the parchment. `controls` because a recording you cannot pause or
-// scrub is a thing that happens to you; nothing autoplays, because the table
-// makes no sound nobody asked for.
+// A player on the parchment, in the desk's own hand: a mark to press and a
+// thin line to travel, the same amber a thread is drawn in. The browser's
+// transport is a white pill with three dots on candlelight — the one place the
+// desk builds its own control rather than borrowing one, because there is no
+// borrowed one that belongs here. Nothing autoplays: the table makes no sound
+// nobody asked for. The wiring lives in view.js; this only lays it out.
 function playerFor(src, { rig = false, demoSrc = null, kind = null, name = null } = {}) {
   const use = !rig && demoSrc ? demoSrc : src; // the deployed page plays the derivative (D75)
   const as = playsAs(use, { kind, name });
   if (!isPlace(use) || !as) return null;
-  const el = document.createElement(as);
-  el.className = `back__play back__play--${el.tagName.toLowerCase()}`;
-  el.src = use;
-  el.controls = true;
-  el.preload = 'metadata';
-  el.dataset.plays = ''; // the tap that works a player is not the tap that lays the card down
-  if (el.tagName === 'VIDEO') el.playsInline = true;
-  return el;
+
+  const media = document.createElement(as);
+  media.src = use;
+  media.preload = 'metadata';
+  if (as === 'video') media.playsInline = true;
+
+  const wrap = document.createElement('div');
+  wrap.className = `back__play back__play--${as}`;
+  wrap.dataset.plays = ''; // the tap that works a player is not the tap that lays the card down
+
+  const mark = document.createElement('span');
+  mark.className = 'play__mark';
+  mark.dataset.mark = '';
+  mark.textContent = '▶';
+
+  const line = document.createElement('span');
+  line.className = 'play__line';
+  line.dataset.seek = '';
+  const run = document.createElement('span');
+  run.className = 'play__run';
+  line.append(run);
+
+  const at = document.createElement('span');
+  at.className = 'play__at';
+  at.dataset.at = '';
+
+  if (as === 'video') { // the take shows; the transport sits under it
+    const frame = document.createElement('div');
+    frame.className = 'play__frame';
+    frame.append(media);
+    wrap.append(frame);
+  } else {
+    wrap.append(media);
+  }
+  const bar = document.createElement('div');
+  bar.className = 'play__bar';
+  bar.append(mark, line, at);
+  wrap.append(bar);
+  return wrap;
 }
 
 function line(text, href, download = null) {

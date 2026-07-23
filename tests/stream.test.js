@@ -164,3 +164,11 @@ test('an arrangement is a set of places, and every place lies on the table', () 
   assert.throws(() => s.append(arrange({ why: '   ' })), /must say something/);
   assert.throws(() => s.append({ e: 'arrange', places: { 'E.': [0.1, 0.1] } }), /night must be/);
 });
+
+test('the roster: the cohort is a fact in the log, and it only ever adds', () => {
+  const s = createStream();
+  assert.ok(s.append({ e: 'roster', night: 0, people: ['R.', 'Joris Peters'] }));
+  assert.throws(() => s.append({ e: 'roster', night: 0, people: [] }), /nobody in it/);
+  assert.throws(() => s.append({ e: 'roster', night: 0, people: ['R.', '  '] }), /belongs to a name/);
+  assert.throws(() => s.append({ e: 'roster', night: 0, people: 'R.' }), /nobody in it/);
+});

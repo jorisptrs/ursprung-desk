@@ -63,28 +63,30 @@ test('arrival gating at boundary t values', () => {
   assert.equal(settled.threads.filter((t) => !t.anchor).length, threads.length);
 });
 
-test('strata and quest register are pure outputs of the stream', () => {
+test('strata are pure outputs of the stream, and reach no card’s light', () => {
   const events = loadSeed();
   const state = fold(events, pastEnd(events));
   const deposits = seed.events.filter((ev) => ev.e === 'deposit');
   const quest = state.cards.find((c) => c.artifact.kind === 'quest');
   const newest = state.cards.find((c) => c.id === deposits[deposits.length - 1].artifact.id);
   assert.equal(state.maxNight, 4);
-  assert.equal(quest.stratum, 4);
+  assert.equal(quest.stratum, 4, 'how deep a card lies is still a fact of the log');
   assert.equal(newest.stratum, 0);
-  assert.ok(quest.opacity < newest.opacity, 'older material sinks in opacity');
+  // D14 retired: nothing on this table is translucent, whatever night it is from
+  assert.ok(state.cards.every((c) => c.opacity === 1), 'every card lies at full strength');
 });
 
-test('thread opacity fades with its dimmer end (D14 concretized)', () => {
+test('a thread is as strong as its ends, and its ends no longer fade (D14 retired)', () => {
   const s = createStream();
-  s.append(makeDeposit('x-old', 0)); // will sink two strata
+  s.append(makeDeposit('x-old', 0)); // two strata down, and no dimmer for it
   s.append(makeDeposit('x-new', 2));
   s.append({ e: 'thread', night: 2, from: 'x-old', to: 'x-new', why: 'same problem' });
   const state = fold(s.all(), pastEnd(s.all()));
   const [thread] = state.threads;
   const byId = new Map(state.cards.map((c) => [c.id, c]));
-  assert.equal(thread.opacity, Math.min(byId.get('x-old').opacity, byId.get('x-new').opacity));
-  assert.ok(thread.opacity < byId.get('x-new').opacity, 'the thread must sink with the older card');
+  assert.equal(thread.opacity, Math.min(byId.get('x-old').opacity, byId.get('x-new').opacity),
+    'the rule stands even though nothing is dim: a thread never outshines its ends');
+  assert.equal(thread.opacity, 1);
 });
 
 test('threads are events in the same stream and render only between visible cards', () => {
@@ -137,8 +139,14 @@ test('a work by several hands floats between them, held by threads to each', () 
 
   const e = s.studios.find((x) => x.name === 'E.').place;
   const m = s.studios.find((x) => x.name === 'M.').place;
-  assert.ok(Math.abs(shared.x - (e[0] + m[0]) / 2) < 1e-3, 'it sits between them');
-  assert.ok(Math.abs(shared.y - (e[1] + m[1]) / 2) < 1e-3);
+  const span = Math.hypot(e[0] - m[0], e[1] - m[1]);
+  const off = Math.hypot(shared.x - (e[0] + m[0]) / 2, shared.y - (e[1] + m[1]) / 2);
+  // between them, not exactly halfway: it yields where a studio crowds it,
+  // because being legible beats being to the millimetre
+  assert.ok(off < span * 0.15, `it sits between them (${off.toFixed(3)} off a ${span.toFixed(3)} span)`);
+  const toE = Math.hypot(shared.x - e[0], shared.y - e[1]);
+  const toM = Math.hypot(shared.x - m[0], shared.y - m[1]);
+  assert.ok(Math.abs(toE - toM) < span * 0.2, 'and belongs to neither more than the other');
 
   const anchors = s.threads.filter((t) => t.anchor && t.from === 'a-3');
   assert.equal(anchors.length, 2, 'and both ends are drawn — without them it is an orphan in a gap');
@@ -233,7 +241,16 @@ test('a castle-scale table: the map holds where the scatter collapsed', () => {
   // studios rather than as a hundred separate things competing for the light
   const places = new Set(shown.map(group)).size;
   assert.ok(places < s.cards.length / 2, `a hundred works, ${places} places on the table`);
-  assert.ok(covered < 25, `covered caption strips stay far below the scatter's 209 (was ${covered})`);
+  assert.ok(covered < 12, `covered caption strips stay far below the scatter's 209 (was ${covered})`);
+
+  // and every shared work reads as belonging to the hands that made it
+  const at = new Map(s.studios.map((x) => [x.name, x.place]));
+  const off = s.cards.filter((c) => c.between && !c.depth).map((c) => {
+    const hands = c.makers.map((m) => at.get(m)).filter(Boolean);
+    return Math.hypot(c.x - hands.reduce((a, p) => a + p[0], 0) / hands.length,
+      c.y - hands.reduce((a, p) => a + p[1], 0) / hands.length);
+  }).sort((a, b) => a - b);
+  assert.ok(off[off.length >> 1] < 0.1, `a shared work sits between its makers (median ${off[off.length >> 1].toFixed(3)} off)`);
 
   // and every studio stands inside the light
   for (const st of s.studios) {
@@ -265,4 +282,61 @@ test('someone with nothing of their own still stands somewhere a thread can reac
   assert.ok(t.place.every((v) => v > 0.02 && v < 0.98), 'and still has a place on the table');
   const anchor = s.threads.find((x) => x.anchor && String(x.toPlace) === String(t.place));
   assert.ok(anchor, 'the shared work hangs from it — the view draws the name there, so no thread ends in air');
+});
+
+test('a registered cohort stands on the table before anyone deposits anything', () => {
+  const roster = { e: 'roster', night: 0, people: ['R.', 'B.', 'M.'] };
+  const empty = fold([roster], pastEnd([roster]));
+  assert.deepEqual(empty.studios.map((s) => s.name), ['R.', 'B.', 'M.'], 'a room of named empty places');
+  assert.ok(empty.studios.every((s) => s.held === 0));
+  assert.ok(empty.studios.every((s) => s.place[0] > 0.02 && s.place[0] < 0.98), 'each with somewhere to stand');
+  assert.equal(empty.cards.length, 0);
+
+  // and the log's own names follow the registered ones, never replacing them
+  const evs = [roster, person('a-1', ['E.']), person('a-2', ['B.'])];
+  const s = fold(evs, pastEnd(evs));
+  assert.deepEqual(s.studios.map((x) => x.name), ['R.', 'B.', 'M.', 'E.']);
+  assert.equal(s.studios.find((x) => x.name === 'B.').held, 1, 'a registered person’s pile is their own');
+
+  // rosters accumulate; a later one adds and never unmakes
+  const later = [...evs, { e: 'roster', night: 2, people: ['Y.', 'B.'] }];
+  assert.deepEqual(fold(later, pastEnd(later)).studios.map((x) => x.name), ['R.', 'B.', 'M.', 'Y.', 'E.']);
+});
+
+// ---- what a new card costs the table, and what a new stack costs it ----
+
+const moved = (a, b) => Math.max(0, ...Object.keys(a).filter((k) => b[k])
+  .map((k) => Math.hypot(a[k][0] - b[k][0], a[k][1] - b[k][1])));
+
+test('another card on a pile that already stands moves nothing at all', () => {
+  // the room was reserved when the stack began, so the table has no reason to
+  // shift — and the keeper's rule is that it must not, since people are reading
+  const base = [person('a-1', ['E.']), person('a-2', ['M.']), person('a-3', ['E.', 'M.'])];
+  const before = fold(base, pastEnd(base));
+  for (const extra of [person('a-4', ['E.']), person('a-5', ['E.', 'M.']), person('a-6', ['M.'])]) {
+    const evs = [...base, extra];
+    assert.equal(moved(before.places, fold(evs, pastEnd(evs)).places), 0,
+      `laying ${extra.artifact.id} moved the table`);
+  }
+});
+
+test('a stack that never stood before costs a small rearrangement, not a redraw', () => {
+  const base = [person('a-1', ['E.']), person('a-2', ['M.']), person('a-3', ['Y.'])];
+  const before = fold(base, pastEnd(base));
+  // a person nobody has seen, and a pairing nobody has made
+  for (const first of [person('a-4', ['N.']), person('a-5', ['E.', 'Y.'])]) {
+    const evs = [...base, first];
+    const after = fold(evs, pastEnd(evs));
+    const shift = moved(before.places, after.places);
+    assert.ok(shift > 0, `${first.artifact.id} started a stack and nothing budged for it`);
+    assert.ok(shift < 0.12, `the table was redrawn rather than nudged (${shift.toFixed(3)})`);
+    for (const s of after.studios) {
+      assert.ok(s.place[0] > 0.02 && s.place[0] < 0.98 && s.place[1] > 0.02 && s.place[1] < 0.98);
+    }
+  }
+});
+
+test('the same table folds to the same places however many times it is asked', () => {
+  const evs = [person('a-1', ['E.']), person('a-2', ['M.']), person('a-3', ['E.', 'M.']), person('a-4', ['N.'])];
+  assert.deepEqual(fold(evs, pastEnd(evs)).places, fold(evs, pastEnd(evs)).places);
 });

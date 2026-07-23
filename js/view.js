@@ -55,6 +55,8 @@ export function createView(field, { rig = false } = {}) {
   const markEls = new Map(); // person → element
 
   const short = () => Math.min(rect.w, rect.h);
+  let lastPointer = { x: 0, y: 0 }; // where a press landed, for seeking along a line
+  field.addEventListener('pointerdown', (e) => { lastPointer = { x: e.clientX, y: e.clientY }; }, true);
 
   const cardSizePx = (card) => {
     const w = short() * CARD_W * card.scale;
@@ -118,6 +120,24 @@ export function createView(field, { rig = false } = {}) {
     field.dataset.opening = '';
     clearTimeout(motionTimer);
     motionTimer = setTimeout(() => { delete field.dataset.opening; }, 320);
+  }
+
+  // The box a thread must stop short of at a studio's place: the written name if
+  // the studio stands empty, a bare point once a pile covers it.
+  const MARK_GAP = 5; // px of air between the string and the letters
+  function placeBoxPx([px, py]) {
+    const cx = px * rect.w;
+    const cy = py * rect.h;
+    for (const el of markEls.values()) {
+      if (el.dataset.held !== '0') continue;
+      const at = el.offsetLeft + el.offsetWidth / 2;
+      const to = el.offsetTop + el.offsetHeight / 2;
+      if (Math.hypot(at - cx, to - cy) > 2) continue;
+      const w = el.offsetWidth / 2 + MARK_GAP;
+      const h = el.offsetHeight / 2 + MARK_GAP;
+      return { cx, cy, x1: cx - w, y1: cy - h, x2: cx + w, y2: cy + h };
+    }
+    return { cx, cy, x1: cx, y1: cy, x2: cx, y2: cy };
   }
 
   const cardBoxPx = (card) => {
@@ -317,8 +337,11 @@ export function createView(field, { rig = false } = {}) {
     const a = byId.get(thread.from);
     if (!a) return null;
     const A = cardBoxPx(a);
+    // An anchor runs to a studio's place, which is the middle of its stack. Where
+    // the studio stands empty its name is written there, so the thread backs off
+    // that name's own box rather than running through the letters.
     const B = thread.toPlace
-      ? { cx: thread.toPlace[0] * rect.w, cy: thread.toPlace[1] * rect.h, x1: 0, y1: 0, x2: 0, y2: 0 }
+      ? placeBoxPx(thread.toPlace)
       : cardBoxPx(byId.get(thread.to) ?? {});
     if (!thread.toPlace && !byId.get(thread.to)) return null;
     const dx = B.cx - A.cx;
@@ -328,7 +351,7 @@ export function createView(field, { rig = false } = {}) {
     const ux = dx / span;
     const uy = dy / span;
     const tA = rayExit(A.cx, A.cy, ux, uy, A); // leave the from-card
-    const tB = thread.toPlace ? 0 : rayExit(B.cx, B.cy, -ux, -uy, B); // back off the to-card
+    const tB = rayExit(B.cx, B.cy, -ux, -uy, B); // back off whatever stands there
     const len = span - tA - tB;
     if (len <= 2) return null; // cards touch — nothing to draw between them
     return {
@@ -369,6 +392,7 @@ export function createView(field, { rig = false } = {}) {
       let el = cardEls.get(card.id);
       if (!el) {
         el = renderCard(card.artifact, { rig });
+        wirePlayers(el);
         el.dataset.id = card.id;
         cardEls.set(card.id, el);
         field.append(el);
@@ -585,7 +609,61 @@ export function createView(field, { rig = false } = {}) {
   // the players live on the back now, so stillness means pausing what is there.
   function stopExperience(id) {
     if (id == null) return;
-    for (const el of cardEls.get(id)?.querySelectorAll('[data-plays]') ?? []) el.pause?.();
+    for (const el of cardEls.get(id)?.querySelectorAll('[data-plays] audio, [data-plays] video') ?? []) el.pause();
+  }
+
+  // ---- the desk's own transport (D151) ----
+
+  const clock = (t) => {
+    if (!Number.isFinite(t) || t < 0) t = 0;
+    return `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+  };
+
+  // The bar is painted from the recording, never the other way round: seeking
+  // sets the time and the next frame draws it, so a dropped event cannot leave
+  // the line saying something the sound is not doing.
+  function paintPlayer(wrap) {
+    const media = wrap.querySelector('audio, video');
+    if (!media) return;
+    const done = media.duration > 0 ? media.currentTime / media.duration : 0;
+    wrap.querySelector('.play__run').style.width = `${(done * 100).toFixed(2)}%`;
+    wrap.querySelector('[data-mark]').textContent = media.paused ? '▶' : '▮▮';
+    const left = wrap.querySelector('[data-at]');
+    left.textContent = media.duration > 0 ? clock(media.duration - media.currentTime) : '';
+  }
+
+  // One press works whatever is under it: the mark starts and stops, the line
+  // moves through. A press anywhere else on a player is not a press on the card.
+  function workPlayer(target) {
+    const wrap = target.closest('[data-plays]');
+    const media = wrap?.querySelector('audio, video');
+    if (!media) return;
+    if (target.closest('[data-seek]')) {
+      const line = target.closest('[data-seek]').getBoundingClientRect();
+      const at = Math.min(1, Math.max(0, (lastPointer.x - line.left) / (line.width || 1)));
+      if (media.duration > 0) media.currentTime = at * media.duration;
+      paintPlayer(wrap);
+      return;
+    }
+    if (media.paused) {
+      for (const other of field.querySelectorAll('[data-plays] audio, [data-plays] video')) {
+        if (other !== media) other.pause(); // one recording at a time, always (D75)
+      }
+      media.play().catch(() => {});
+    } else media.pause();
+  }
+
+  // the players of a card just built: painted once, and repainted as they run
+  function wirePlayers(el) {
+    for (const wrap of el.querySelectorAll('[data-plays]')) {
+      const media = wrap.querySelector('audio, video');
+      if (!media || media.dataset.wired) continue;
+      media.dataset.wired = '';
+      for (const ev of ['timeupdate', 'loadedmetadata', 'play', 'pause', 'ended', 'seeked']) {
+        media.addEventListener(ev, () => paintPlayer(wrap));
+      }
+      paintPlayer(wrap);
+    }
   }
 
   // The only door left is 'visit': the work runs elsewhere and the table stays
@@ -674,5 +752,5 @@ export function createView(field, { rig = false } = {}) {
     relayThreads(); // cards are %/cqmin and re-flow by CSS
   }
 
-  return { renderInstant, playEvent, cancelActive, finishActive, onResize, flipJob, flipInstant, tapDoor, pageBack, spreadPile, pileOpen };
+  return { renderInstant, playEvent, cancelActive, finishActive, onResize, flipJob, flipInstant, tapDoor, pageBack, spreadPile, pileOpen, workPlayer };
 }
