@@ -25,6 +25,7 @@ function makeDeposit(id, night, overrides = {}) {
       kind: 'work',
       title: `placeholder ${id}`,
       practice: 'music',
+      people: ['R.'],
       provenance: 'curator',
       visibility: 'public',
       excerpt: { form: 'words', text: 'placeholder' },

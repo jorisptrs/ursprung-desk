@@ -18,7 +18,7 @@ function memoryBackend() {
   };
 }
 
-const art = (title) => ({ media: 'text', kind: 'work', title, practice: 'writing', provenance: 'hand', visibility: 'public', excerpt: { form: 'sentence', text: 'y' } });
+const art = (title) => ({ media: 'text', kind: 'work', title, practice: 'writing', people: ['E.'], provenance: 'hand', visibility: 'public', excerpt: { form: 'sentence', text: 'y' } });
 
 test('token: minted once, then possession is identity', async () => {
   const backend = memoryBackend();

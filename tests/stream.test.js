@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createStream } from '../js/stream.js';
+import { createStream, isPlace } from '../js/stream.js';
 
 function artifact(overrides = {}) {
   return {
@@ -11,6 +11,7 @@ function artifact(overrides = {}) {
     kind: 'work',
     title: 'a placeholder',
     practice: 'manuscript',
+    people: ['E.'],
     provenance: 'curator',
     visibility: 'public',
     excerpt: { form: 'sentence', text: 'one line' },
@@ -97,4 +98,57 @@ test('rejects retirement of an unknown artifact', () => {
 test('rejects unknown event types — no fourth kind of truth', () => {
   const s = createStream();
   assert.throws(() => s.append({ e: 'like', night: 1 }), /unknown event type/);
+});
+
+test('a door leads to a file or a page — never to a script (D127)', () => {
+  const withDoor = (src, id) => ({
+    e: 'deposit', night: 0,
+    artifact: { ...artifact({ id }), detail: { experience: { mode: 'visit', src } } },
+  });
+
+  // the places a real door leads: a file the desk laid, a page, a materialized blob
+  const places = ['assets/Test.m4a', 'drop/assets/m-001.mp4', 'https://a.test/x', 'http://a.test', 'blob:http://localhost/abc'];
+  places.forEach((good, i) => {
+    assert.doesNotThrow(() => createStream().append(withDoor(good, `p-${i}`)), `${good} is a place`);
+  });
+
+  // and the ones that are not destinations at all
+  const notPlaces = ['javascript:alert(1)', 'JaVaScRiPt:alert(1)', 'java\nscript:alert(1)', ' javascript:alert(1)', 'data:text/html,<script>', 'file:///etc/passwd'];
+  notPlaces.forEach((bad, i) => {
+    assert.throws(() => createStream().append(withDoor(bad, `b-${i}`)), /not to a script/, JSON.stringify(bad));
+  });
+
+  // demoSrc is a door too (D75: the deployed page plays that one)
+  assert.throws(() => createStream().append({
+    e: 'deposit', night: 0,
+    artifact: { ...artifact(), detail: { experience: { mode: 'play', src: 'a.wav', demoSrc: 'javascript:alert(1)' } } },
+  }), /not to a script/);
+});
+
+test('isPlace: control characters are stripped before the scheme is read (D127)', () => {
+  // browsers ignore them inside a URL, so a naive regex is the only thing fooled
+  assert.equal(isPlace('java\tscript:alert(1)'), false);
+  assert.equal(isPlace('\tjavascript:alert(1)'), false);
+  assert.equal(isPlace('//cdn.test/x'), true, 'protocol-relative is still the web');
+  assert.equal(isPlace('assets/x.svg'), true);
+  assert.equal(isPlace(''), false);
+  assert.equal(isPlace(null), false);
+});
+
+test('blank is not filled: whitespace never stands in for a word (D128)', () => {
+  const s = createStream();
+  // a title of one space is not something a reader can read
+  assert.throws(() => s.append({ e: 'deposit', night: 0, artifact: artifact({ title: '   ', caption: undefined, excerpt: { form: 'sentence' } }) }),
+    /a card needs a title, a caption, or a line of its own/);
+  // nor is an author of one space an author
+  assert.throws(() => s.append({ e: 'deposit', night: 0, artifact: artifact({ people: ['  '] }) }), /people must be strings/);
+  // and a blank practice is the same as none stated, which the stream refuses to call a practice
+  assert.throws(() => s.append({ e: 'deposit', night: 0, artifact: artifact({ practice: ' ' }) }), /practice, if present/);
+});
+
+test('a back is an object — an array is not one (D128)', () => {
+  const s = createStream();
+  assert.throws(() => s.append({ e: 'deposit', night: 0, artifact: artifact({ detail: [1, 2, 3] }) }), /detail must be an object/);
+  assert.throws(() => s.append({ e: 'deposit', night: 0, artifact: artifact({ detail: null }) }), /detail must be an object/);
+  assert.doesNotThrow(() => s.append({ e: 'deposit', night: 0, artifact: artifact({ detail: { note: 'a line' } }) }));
 });

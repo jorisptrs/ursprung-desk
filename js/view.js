@@ -9,6 +9,7 @@
 import { renderCard, backModel } from './cards.js';
 import { CARD_W, NOMINAL_H } from './fold.js';
 import { sleep } from './queue.js';
+import { isPlace } from './stream.js';
 
 const EASE = 'cubic-bezier(0.22, 0.9, 0.3, 1)'; // decelerating, like a hand withdrawing
 const FLOOR_W = 120; // px pair (width, width·0.075 font) a card never shrinks past —
@@ -475,6 +476,7 @@ export function createView(field, { rig = false } = {}) {
     const model = card ? backModel(card.artifact) : null;
     if (!model?.door) return;
     if (model.door.mode === 'visit') { // the work runs elsewhere; the table stays still
+      if (!isPlace(model.door.src)) return; // never a script, however it got here (D127)
       window.open(model.door.src, '_blank', 'noopener');
       return;
     }

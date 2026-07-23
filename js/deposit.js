@@ -266,6 +266,28 @@ export function composeDoc({ docText = '', pieces = new Map(), linkMeta = new Ma
   return { ...out, unknownRefs };
 }
 
+// Where a pile of n set-aside cards opens to under the pointer (D114), in
+// unit offsets from the pile's center: alone it just grows in place; two step
+// to the sides; three take corners; from six on, rows of three.
+export function deckSpread(n) {
+  if (n <= 1) return [[0, 0]];
+  if (n === 2) return [[-1, 0], [1, 0]];
+  if (n === 3) return [[-1, -1], [1, -1], [0, 1]];
+  if (n === 4) return [[-1, -1], [1, -1], [-1, 1], [1, 1]];
+  if (n === 5) return [[-1, -1], [1, -1], [0, 0], [-1, 1], [1, 1]];
+  const out = [];
+  const rows = Math.ceil(n / 3);
+  for (let i = 0; i < n; i++) {
+    const r = Math.floor(i / 3);
+    const inRow = Math.min(3, n - r * 3);
+    const c = i % 3;
+    const x = inRow === 1 ? 0 : (inRow === 2 ? (c === 0 ? -1 : 1) : c - 1);
+    const y = rows === 1 ? 0 : (r / (rows - 1)) * 2 - 1;
+    out.push([x, y]);
+  }
+  return out;
+}
+
 // One title only (D99): while any '# ' line stands — a bare '# ' still being
 // written counts — the title door leaves the slash menu; deleting the line
 // brings it back.
@@ -736,15 +758,31 @@ export function openSheet({ mode = 'overlay', container = document.body, sink, p
   const push = h('span', 'sheet__action sheet__push', 'push to table');
   const aside = h('span', 'sheet__action sheet__aside', 'set aside');
   actions.append(push, aside);
+  // The pile says everything itself (D114): no label, no line — cards on
+  // cards, centered, and the batch door beneath once more than one waits.
   const deckBox = h('div', 'sheet__deck');
   deckBox.style.display = 'none';
-  const deckFan = h('div', 'sheet__deckfan');
-  const deckHead = h('div', 'sheet__row sheet__deckhead');
-  const pushAll = h('span', 'sheet__action sheet__pushall', ''); // only when the deck holds more than one (D101)
+  const stack = h('div', 'sheet__stack');
+  const pushAll = h('span', 'sheet__action sheet__pushall', ''); // only when the pile holds more than one (D101)
   pushAll.style.display = 'none';
-  deckHead.append(h('span', 'sheet__label', 'the deck'), pushAll);
-  deckBox.append(deckHead, deckFan);
+  deckBox.append(stack, pushAll);
   panel.append(previews, status, actions, deckBox);
+
+  // A click opens the pile — never a passing pointer (D115): the cards are
+  // large when they open, and a pile that unfolded itself under a cursor on
+  // its way somewhere else was startling. Mouse and touch now share one
+  // gesture; the click that opens never also picks, so the first click opens
+  // and the second takes a card.
+  let stackWasOpen = true; // only a click with no pointerdown before it (a direct one) reaches this
+  const openStack = () => stack.classList.add('stack--open');
+  const closeStack = () => stack.classList.remove('stack--open');
+  stack.addEventListener('pointerdown', () => {
+    stackWasOpen = stack.classList.contains('stack--open');
+    openStack();
+  });
+  sheet.addEventListener('pointerdown', (e) => { // anywhere else on the sheet folds it back
+    if (!(e.target instanceof Element) || !e.target.closest('.sheet__stack')) closeStack();
+  });
 
   const say = (msg) => { status.textContent = msg ?? ''; };
 
@@ -790,13 +828,13 @@ export function openSheet({ mode = 'overlay', container = document.body, sink, p
     if (unknownRefs.length) say(`a reference points at nothing · ${unknownRefs.join(', ')}`);
     else if (status.textContent.startsWith('a reference points')) say('');
     if (!artifact.media) {
-      face(null, 'front', 'the card appears here');
+      face(null, 'front of the card', ''); // the empty plate says it itself — no instruction on the sheet
       return;
     }
     const urlFor = (b) => { const u = URL.createObjectURL(b); state.previewUrls.push(u); return u; };
     const front = renderCard({ ...materialize(artifact, blobs, urlFor), id: 'h-preview' });
     front.classList.add('sheet__card');
-    face(front, front.classList.contains('card--backed') ? 'front · the page above is its back' : 'front · the card stays closed', '');
+    face(front, front.classList.contains('card--backed') ? 'front of the card · the page above is its back' : 'front of the card · it stays closed', '');
   }
 
   // The link preview asks the page itself, once — og/twitter image and title;
@@ -999,17 +1037,25 @@ export function openSheet({ mode = 'overlay', container = document.body, sink, p
     say('picked up from the deck · push it or set it aside again');
   }
 
-  // The deck (D99): every set-aside card in person — small, fanned, waiting.
-  // Tap one to pick it up; × removes it; pushing a picked-up card leaves it.
+  // The pile (D99/D114): every set-aside card in person, stacked. Open, each
+  // stands at its spread place, grown readable — the one under the pointer
+  // rises; a tap picks it up; its × lets it go.
   let deckUrls = [];
+  const CARD_W = 180; // the laid pair (D66) — open, a card stands the size it will lie on the table
+  const CLOSED = 0.52; // resting, the pile is still a pile
+  const SPREAD_X = 200; // px between spread columns — full-size cards clear each other
   async function refreshDeck() {
     const entries = await tray.list();
     for (const u of deckUrls) URL.revokeObjectURL(u);
     deckUrls = [];
-    deckFan.replaceChildren();
+    stack.replaceChildren();
+    const spread = deckSpread(entries.length);
     entries.forEach((entry, i) => {
       const slot = h('div', 'deck-card');
       slot.style.setProperty('--tilt', `${(((i % 5) - 2) * 2.2).toFixed(1)}deg`);
+      slot.style.setProperty('--cx', `${((i * 37) % 7) - 3}px`); // the pile's small disorder, deterministic
+      slot.style.setProperty('--cy', `${((i * 53) % 5) - 2}px`);
+      slot.style.zIndex = i + 1;
       slot.title = entry.artifact.title || '(untitled)';
       const urlFor = (b) => { const u = URL.createObjectURL(b); deckUrls.push(u); return u; };
       try {
@@ -1026,12 +1072,31 @@ export function openSheet({ mode = 'overlay', container = document.body, sink, p
         refreshDeck();
       });
       slot.append(x);
-      slot.addEventListener('click', () => pickUp(entry));
-      deckFan.append(slot);
+      slot.addEventListener('click', () => { if (stackWasOpen) pickUp(entry); });
+      stack.append(slot);
     });
     deckBox.style.display = entries.length ? '' : 'none';
     pushAll.style.display = entries.length > 1 ? '' : 'none';
     pushAll.textContent = `push all ${entries.length} to table`;
+    if (!entries.length) return;
+    // The pile reserves its own room, closed and open, so the spread never
+    // lies over the sheet's other furniture (D114). Vertical step follows the
+    // cards' real height — slips open tight, photographs open tall.
+    // offsetHeight is the untransformed height, so this is the card at its
+    // open (laid) size — the scales below are what shrink the closed pile.
+    const measured = Math.max(...[...stack.children].map((s) => s.offsetHeight || 0));
+    const tallest = measured > 4 ? measured : 190; // unmeasurable only while detached
+    const spreadY = Math.round(tallest * 0.55 + 22);
+    const maxX = Math.max(...spread.map(([x]) => Math.abs(x)));
+    const maxY = Math.max(...spread.map(([, y]) => Math.abs(y)));
+    [...stack.children].forEach((slot, i) => {
+      slot.style.setProperty('--sx', `${spread[i][0] * SPREAD_X}px`);
+      slot.style.setProperty('--sy', `${spread[i][1] * spreadY}px`);
+    });
+    stack.style.setProperty('--closed-w', `${Math.round(CARD_W * CLOSED) + 12}px`);
+    stack.style.setProperty('--closed-h', `${Math.round(tallest * CLOSED) + 18}px`);
+    stack.style.setProperty('--open-w', `${maxX * 2 * SPREAD_X + CARD_W + 12}px`);
+    stack.style.setProperty('--open-h', `${maxY * 2 * spreadY + tallest + 12}px`);
   }
 
   // The door's own rule, applied to a card nobody is holding (D99/D101).
@@ -1063,7 +1128,7 @@ export function openSheet({ mode = 'overlay', container = document.body, sink, p
     else await tray.stage(entry);
     clearForm();
     await refreshDeck();
-    if (!quiet) say(editing ? 'kept' : 'set aside · in the deck');
+    if (!quiet) say(editing ? 'kept' : ''); // the pile gaining a card is the whole answer (D114)
     return true;
   }
 

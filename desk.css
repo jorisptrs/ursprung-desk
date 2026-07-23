@@ -722,14 +722,13 @@ html.rig, html.rig body { cursor: none; }
 
 .sheet__card--back .card__back { position: relative; inset: auto; transform: none; }
 
+/* the empty plate: card-shaped and wordless, so nothing shifts when the first
+   card appears and the sheet never instructs anyone (D115) */
 .sheet__hintcard {
   border: 1px dashed rgba(210, 190, 150, 0.2);
   border-radius: 8px;
-  padding: 2.4em 1em;
   width: 180px;
-  text-align: center;
-  font-size: 0.8em;
-  color: rgba(232, 220, 196, 0.45);
+  min-height: 118px;
 }
 
 .sheet__status {
@@ -738,7 +737,7 @@ html.rig, html.rig body { cursor: none; }
   color: rgba(211, 207, 199, 0.85); /* the ashen register speaks the dry lines */
 }
 
-.sheet__actions { display: flex; gap: 1.6em; align-items: baseline; }
+.sheet__actions { display: flex; gap: 1.6em; align-items: baseline; justify-content: center; } /* the two doors stand centered (D114) */
 
 .sheet__push { /* the door itself — it stands a little firmer (D99) */
   font-size: 1.02em;
@@ -748,40 +747,56 @@ html.rig, html.rig body { cursor: none; }
 
 .sheet__push--busy { opacity: 0.5; pointer-events: none; }
 
-/* the deck (D99): set-aside cards in person — small, fanned, waiting */
+/* the set-aside pile (D99/D114/D115): cards on cards, no label — a click opens
+   them to the sides at the size they will lie on the table; the one under the
+   pointer rises a little */
 .sheet__deck {
   border-top: 1px solid rgba(210, 190, 150, 0.14);
-  padding-top: 0.85em;
+  padding-top: 0.9em;
   display: flex;
   flex-direction: column;
-  gap: 0.6em;
+  align-items: center;
+  gap: 0.7em;
 }
 
-.sheet__deckhead { align-items: baseline; }
+.sheet__stack {
+  position: relative;
+  width: var(--closed-w, 7em);
+  height: var(--closed-h, 8em);
+  z-index: 20;
+  transition: width 240ms cubic-bezier(0.22, 0.9, 0.3, 1), height 240ms cubic-bezier(0.22, 0.9, 0.3, 1);
+}
 
-.sheet__pushall { margin-left: auto; font-size: 0.88em; } /* the deck's own door, at the line's far right (D101) */
-
-.sheet__deckfan {
-  display: flex;
-  align-items: flex-start;
-  padding: 0.4em 0 0.5em 0.6em;
+/* open, the pile takes its true room — the sheet makes way instead of being lain over */
+.sheet__stack.stack--open {
+  width: var(--open-w, 20em);
+  height: var(--open-h, 16em);
 }
 
 .deck-card {
-  position: relative;
+  position: absolute;
+  left: 50%;
+  top: 50%;
   cursor: pointer;
-  transform: rotate(var(--tilt, 0deg));
-  transition: transform 160ms ease;
+  /* the card is built at its laid size and the closed pile shrinks it, so
+     opening is a return to true size rather than a magnification */
+  transform: translate(calc(-50% + var(--cx, 0px)), calc(-50% + var(--cy, 0px))) rotate(var(--tilt, 0deg)) scale(0.52);
+  transition: transform 240ms cubic-bezier(0.22, 0.9, 0.3, 1);
 }
 
-.deck-card:not(:first-child) { margin-left: -30px; }
+.sheet__stack.stack--open .deck-card {
+  transform: translate(calc(-50% + var(--sx, 0px)), calc(-50% + var(--sy, 0px))) rotate(0deg) scale(1);
+}
 
-.deck-card:hover { transform: translateY(-6px) rotate(0deg); z-index: 5; }
+.sheet__stack.stack--open .deck-card:hover {
+  transform: translate(calc(-50% + var(--sx, 0px)), calc(-50% + var(--sy, 0px))) rotate(0deg) scale(1.06);
+  z-index: 40; /* the chosen one rises over its neighbours */
+}
 
 .deck-card .card {
   position: relative;
-  width: 92px;
-  font-size: 6.9px; /* the laid ratio (D66), at deck scale */
+  width: 180px;
+  font-size: 13.5px; /* the laid pair (D66) — the same card the preview shows */
   color: var(--ink);
   pointer-events: none; /* the slot takes the tap; the mini is a picture of the card */
 }
@@ -799,4 +814,36 @@ html.rig, html.rig body { cursor: none; }
   transition: opacity 120ms ease;
 }
 
-.deck-card:hover .deck-card__x { opacity: 1; }
+.stack--open .deck-card:hover .deck-card__x { opacity: 1; }
+
+.sheet__pushall { font-size: 0.88em; margin-top: 0.5em; } /* the pile's own door, a little beneath it (D101/D114) */
+
+/* the trace holds its own marks — relative only, so nothing about the laid
+   card's box changes; it merely becomes the ground the play sign sits on */
+.card__trace { position: relative; }
+
+/* A take carries its mark (D119): the strip would otherwise read as three
+   photographs. A sign, never a control — it takes no pointer; the card still
+   turns, and the play door on the back is what summons the work (D72/D75). */
+.trace__play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1.9em;
+  height: 1.9em;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgba(24, 20, 15, 0.42);
+  pointer-events: none;
+}
+
+.trace__play::after {
+  content: '';
+  position: absolute;
+  left: 54%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  border-left: 0.62em solid rgba(240, 232, 214, 0.92);
+  border-top: 0.38em solid transparent;
+  border-bottom: 0.38em solid transparent;
+}
