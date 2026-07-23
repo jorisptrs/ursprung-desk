@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { cornerRadii, backModel, makersLine, playable, playsAs } from '../js/cards.js';
+import { cornerRadii, backModel, makersLine, playable, playsAs, opensOnItsOwn } from '../js/cards.js';
 
 test('corner radii are deterministic per id and distinct across ids (D24)', () => {
   assert.equal(cornerRadii('a-001'), cornerRadii('a-001'));
@@ -46,7 +46,12 @@ test('backModel (D5/D74): doors, files, notes as pure data; empty ≡ absent', (
   const meta = backModel(byId.get('a-017'));
   assert.match(meta.note, /seeded demonstration/, 'the disclosure lives on the meta back (D70)');
 
-  assert.equal(backModel(byId.get('a-014')), null, 'the backless card stays backless');
+  // D169: a photograph opens on its own — the same surface at reading size,
+  // which discloses nothing, since it is what the front was already showing
+  const bare = backModel(byId.get('a-014'));
+  assert.deepEqual(bare.composition, [{ t: 'image', src: 'assets/placeholder-photo.svg', caption: '' }]);
+  assert.equal(bare.door, null, 'and it summons nothing');
+  assert.deepEqual([bare.files, bare.links, bare.note], [[], [], null], 'nothing that was not on the front');
   assert.equal(backModel({ title: 'x', detail: {} }), null, 'empty detail ≡ absent (D5)');
 });
 
@@ -84,4 +89,23 @@ test('a hand-dropped recording has no extension to read — the arrangement says
     'and the name it was dropped under is the next best witness');
   assert.equal(playsAs('assets/Test.m4a', { kind: 'image' }), 'audio', 'a kind that is not a recording defers to the address');
   assert.equal(playsAs(null), null);
+});
+
+test('what opens on its own, and what has nothing more to give (D169)', () => {
+  const card = (over) => ({ media: 'note', kind: 'work', title: 'x', excerpt: { form: 'words', text: 'x' }, ...over });
+  // a quest or a note on Claude that is only its own sentence stays shut
+  assert.equal(opensOnItsOwn(card({ kind: 'quest', excerpt: { form: 'words', text: 'a fold that will not close' } })), false);
+  assert.equal(opensOnItsOwn(card({ kind: 'failure', excerpt: { form: 'words', text: 'tried twice · stays up' } })), false);
+  // a thing worth looking at closely does
+  assert.equal(opensOnItsOwn(card({ media: 'image', excerpt: { form: 'crop', src: 'a.png' } })), true);
+  assert.equal(opensOnItsOwn(card({ media: 'fold', excerpt: { form: 'linework', src: 'a.svg' } })), true);
+  // a summary of a work is not the work: enlarging it shows nothing new, and a
+  // withdrawal stays a withdrawal
+  assert.equal(opensOnItsOwn(card({ media: 'video', excerpt: { form: 'frames', src: 'a.svg' } })), false);
+  assert.equal(opensOnItsOwn(card({ media: 'audio', excerpt: { form: 'waveform', src: 'a.svg' } })), false);
+  // withheld is legal, and stays shut
+  assert.equal(opensOnItsOwn(card({ media: 'image', excerpt: { form: 'crop' } })), false);
+  // words the pile-sized card had to clip are worth opening for
+  assert.equal(opensOnItsOwn(card({ media: 'text', excerpt: { form: 'sentence', text: 'w '.repeat(200) } })), true);
+  assert.equal(opensOnItsOwn(null), false);
 });

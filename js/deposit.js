@@ -763,11 +763,26 @@ async function videoStrip(file) {
   }
 }
 
+// Writing carried in as a file is writing (keeper's ruling): a poem dropped as
+// a .txt lands on the page as its own words, so it fronts the card the way it
+// would if it had been pasted. The original still travels — the composition
+// keeps the file beside the text — but nobody has to download a poem to read it.
+const WRITTEN = /\.(txt|md|markdown|rtf|csv|tsv|log|json|ya?ml|xml|html?|css|js|mjs|ts|tsx|jsx|py|rb|go|rs|c|h|cpp|java|sh|sql)$/i;
+const READS_AS_TEXT = 400_000; // a novel is a file, not a card
+
+export const readsAsWriting = (file) =>
+  !!file && (String(file.type ?? '').startsWith('text/') || WRITTEN.test(file.name ?? ''))
+  && Number(file.size ?? 0) <= READS_AS_TEXT;
+
 // File → piece: the front cut and the untouched original together. A file the
 // device cannot read shelves whole — a quiet line, honest about what it holds.
 async function fileToPiece(file) {
   const media = inferMedia(file.name, file.type);
   try {
+    if (readsAsWriting(file)) {
+      const text = (await file.text()).replace(/\r\n/g, '\n').trim();
+      if (text) return { kind: 'written', name: file.name, caption: stripExt(file.name), blob: file, text };
+    }
     if (media === 'image') {
       return { kind: 'image', name: file.name, caption: stripExt(file.name), blob: file, front: { form: 'crop', src: await imageDataUrl(file) } };
     }
@@ -798,7 +813,7 @@ const KIND_LABELS = { work: 'work', quest: 'quest', failure: 'note on Claude' };
 const KIND_MEANS = {
   work: 'an output, finished or half-way',
   quest: 'an intention, or a challenge you could use help on',
-  failure: 'a case where Claude let you down or was surprisingly helpful',
+  failure: 'a case where Claude was remarkably helpful or unhelpful',
 };
 
 const h = (tag, cls, text) => {
@@ -928,13 +943,13 @@ export function openSheet({
   const kindEls = new Map();
   for (const k of ['work', 'quest']) {
     const opt = h('span', 'sheet__opt', KIND_LABELS[k]);
-    opt.title = KIND_MEANS[k]; // what it is for, on hover — never printed on the table
+    opt.dataset.means = KIND_MEANS[k]; // what it is for, on hover — never printed on the table
     opt.addEventListener('click', () => { state.kind = k; syncMeta(); refreshPreviews(); });
     kindEls.set(k, opt);
     kindRow.append(opt);
   }
   const flag = h('span', 'sheet__opt sheet__flag', KIND_LABELS.failure);
-  flag.title = KIND_MEANS.failure;
+  flag.dataset.means = KIND_MEANS.failure;
   flag.addEventListener('click', () => {
     state.kind = state.kind === 'failure' ? 'work' : 'failure';
     syncMeta();
@@ -1035,7 +1050,7 @@ export function openSheet({
     const shownAs = signedOnly ? { ...artifact, media: 'note' } : artifact;
     const front = renderCard({ ...materialize(shownAs, blobs, urlFor), id: 'h-preview' });
     front.classList.add('sheet__card');
-    face(front, front.classList.contains('card--backed') ? 'front of the card · the page above is its back' : 'front of the card · it stays closed', '');
+    face(front, front.classList.contains('card--backed') ? 'front of the card · the page above is its back' : 'front of the card', '');
   }
 
   // The link preview asks the page itself, once — og/twitter image and title;
@@ -1073,6 +1088,17 @@ export function openSheet({
     if (!taken.length) { say(refused ?? ''); return; }
     for (const file of taken) {
       const piece = await fileToPiece(file);
+      // Writing arrives as writing: the words go on the page where the caret is,
+      // so a poem carried in as a file is the same card as a poem pasted in.
+      if (piece.kind === 'written') {
+        const at = pos ?? ed?.cursor() ?? state.docText.length;
+        const change = refLineChange(state.docText, at, piece.text);
+        if (ed) ed.applyChange(change);
+        else state.docText = state.docText.slice(0, change.from) + change.insert + state.docText.slice(change.to);
+        captionSpan = null;
+        pos = null;
+        continue;
+      }
       const id = mintId();
       state.registry.set(id, piece);
       const caption = (piece.kind === 'file' ? '' : stripExt(file.name)).replace(/[\]\n]/g, ' ');
@@ -1236,7 +1262,6 @@ export function openSheet({
     }
     syncMeta();
     refreshPreviews();
-    say('picked up from the deck · push it or set it aside again');
   }
 
   // The pile (D99/D114): every set-aside card in person, stacked. Open, each

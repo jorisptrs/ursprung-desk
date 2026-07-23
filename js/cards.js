@@ -83,9 +83,45 @@ const basename = (path) => path.split('/').pop();
 // they were arranged; the legacy fields (assets/links/note) stay legal for the
 // seed. A shelved file is a path string or { name, src } — blob originals
 // carry no name of their own.
+// A card turns if there is more to see than the table can show at pile size —
+// a still you want to look at properly, words that were clipped to fit
+// (keeper's ruling). That is not a disclosure: it is the card's own surface at
+// reading size, and what stays private is `detail`, which is still what carries
+// the originals, the files and the links (D5/D11 unchanged in substance).
+// A quest or a note on Claude that is nothing but its own sentence has nothing
+// more to give, and stays shut.
+// A photograph, a crease pattern, a rendering: things where looking closer
+// tells you more. Not a waveform or a frame strip — those are summaries of a
+// work, and blowing up a summary shows nothing the front did not. Keeping them
+// out also keeps a withdrawal a withdrawal: the seed's dish lost its footage,
+// and its strip standing larger would have been a card that opens on nothing.
+const SHOWS_BIGGER = ['crop', 'linework', 'render'];
+const CLIPPED_AT = 180; // characters a pile-sized card can carry without cutting
+
+export function opensOnItsOwn(artifact) {
+  const form = artifact?.excerpt?.form;
+  if (SHOWS_BIGGER.includes(form) && artifact.excerpt?.src) return true;
+  return (artifact?.excerpt?.text ?? '').trim().length > CLIPPED_AT;
+}
+
 export function backModel(artifact) {
-  const d = artifact.detail;
-  if (!d || typeof d !== 'object') return null;
+  const d = artifact?.detail;
+  if (!d || typeof d !== 'object') {
+    if (!opensOnItsOwn(artifact)) return null;
+    // the surface itself, at reading size — nothing the front was not already
+    // showing, only large enough to read or to look at
+    return {
+      title: artifact.media === 'note' ? null : artifact.title,
+      media: artifact.media,
+      door: null,
+      composition: artifact.excerpt.src
+        ? [{ t: 'image', src: artifact.excerpt.src, caption: artifact.caption ?? '' }]
+        : [{ t: 'text', text: artifact.excerpt.text }],
+      files: [],
+      links: [],
+      note: null,
+    };
+  }
   const door = d.experience
     ? { mode: d.experience.mode, src: d.experience.src, demoSrc: d.experience.demoSrc ?? null }
     : null;
@@ -332,23 +368,22 @@ export function renderCard(artifact, opts = {}) {
     front.append(stamp);
   }
 
-  // One text on the face (keeper's ruling): a title if the card has one, else
-  // the work's own words, else the caption of the piece that fronts it. Three
-  // stacked text blocks per card was most of the noise on a full table, and two
-  // of the three were nearly always saying the same thing twice.
-  const WORDS = ['note', 'text', 'code'];
-  const shown = [artifact.title, artifact.excerpt?.text, artifact.caption]
+  // A card is its work and one line naming it (keeper's ruling, D163 amended):
+  // the trace is the work — a still, a waveform, the words themselves — and
+  // above it stands ONE label, the title if there is one and the caption
+  // otherwise. Three stacked texts per card was most of the noise on a full
+  // table; the work itself was never the noise.
+  const label = [artifact.title, artifact.caption]
     .map((v) => (typeof v === 'string' ? v.trim() : ''))
     .find(Boolean) ?? '';
+  const words = (artifact.excerpt?.text ?? '').trim();
+  // …and where the label would only say the work back to you, the work stands
+  // alone: a note whose words ARE its title carries the line once (D40).
+  const sayItTwice = words && label && (words === label || words.startsWith(label));
 
   const trace = document.createElement('div');
   trace.className = 'card__trace';
-  // for a card whose surface IS words, the one text is the surface — it keeps
-  // the excerpt's own typography rather than being demoted to a label
-  const surface = WORDS.includes(artifact.media)
-    ? { ...artifact, excerpt: { ...artifact.excerpt, text: shown } }
-    : artifact;
-  trace.append((TRACES[artifact.media] ?? img)(surface));
+  trace.append((TRACES[artifact.media] ?? img)(artifact));
   // A take says it is a take (D119): the strip alone reads as three photographs.
   // A mark, not a control — the gesture is still the turn, and the door on the
   // back is what summons it (D72/D75).
@@ -359,11 +394,11 @@ export function renderCard(artifact, opts = {}) {
   }
   front.append(trace);
 
-  if (shown && !WORDS.includes(artifact.media)) {
-    const label = document.createElement('div');
-    label.className = 'card__title';
-    label.textContent = shown;
-    front.append(label);
+  if (label && !sayItTwice) {
+    const line = document.createElement('div');
+    line.className = 'card__title';
+    line.textContent = label;
+    front.append(line);
   }
 
   // Whose card this is, in the room's own grammar (D137): the makers as they

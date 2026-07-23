@@ -184,7 +184,13 @@ try {
 
   ok(await evalIn(table, `${HELPERS} until(() => !!document.querySelector('[data-id="a-017"]'), 30000)`, true), 'opening pass runs to rest (meta lands)');
 
-  ok(await evalIn(table, `(() => { const b = document.querySelector('.add-btn'); if (!b) return false; const r = b.getBoundingClientRect(); return b.textContent === '+' && r.left < innerWidth / 2 && r.top > innerHeight / 2; })()`), 'a + waits in the pool\'s bottom-left (D91)');
+  ok(await evalIn(table, `!document.querySelector('.add-btn')`), 'no + on the wood — the way in is space or enter, and the ? says so (D167)');
+  ok(await evalIn(table, `(() => {
+    document.querySelector('.keys-btn').click();
+    const rows = [...document.querySelectorAll('.keys__row')].map((r) => r.textContent);
+    document.querySelector('.keys-btn').click();
+    return rows.some((t) => t.includes('space or enter') && t.includes('add your work'));
+  })()`), 'and the ? names the way in, in words');
   await press(table, 'Enter');
   ok(await evalIn(table, `${HELPERS} edReady()`, true), 'Enter is the +\'s key — the sheet opens, CodeMirror mounts (D98)');
   ok(await evalIn(table, `document.activeElement?.closest('.cm-editor') != null`), 'the pen is ready — the editor has focus');
@@ -201,7 +207,7 @@ try {
     const opts = [...document.querySelectorAll('.sheet__opt')].filter((e) => e.offsetParent !== null);
     const flag = document.querySelector('.sheet__flag');
     return opts.map((e) => e.textContent).join('|') === 'work|quest|note on Claude'
-      && opts.every((e) => (e.title || '').length > 20) // each says what it is for, on hover (D165)
+      && opts.every((e) => (e.dataset.means || '').length > 20) // each says what it is for, at once on hover (D165)
       && flag.getBoundingClientRect().right > document.querySelector('.sheet__opt').getBoundingClientRect().right + 100;
   })()`), "work · quest stand open; the note on Claude waits at the line's far right (D98/D165)");
   ok(await evalIn(table, `getComputedStyle(document.querySelector('.editor')).backgroundColor === 'rgb(222, 209, 182)'`), 'the editor is the parchment back itself (D95)');
@@ -238,7 +244,7 @@ try {
   }, 6000)`, true), 'push to table lays h-001 at once — no staging, and the sheet steps away (D99)');
 
   // -- /image: the slash menu, mid-text, no dashes, into the picker (D96/D97) --
-  await evalIn(table, `document.querySelector('.add-btn').click()`);
+  await pressSpace(table); // the way in, now that the + is gone
   ok(await evalIn(table, `${HELPERS} edReady()`, true), 'a second sheet mounts');
   await evalIn(table, `(() => { const p = document.querySelector('.sheet input[type=file][hidden]'); globalThis.__accept = null; p.click = () => { globalThis.__accept = p.accept; }; })()`);
   await evalIn(table, `__view.focus()`);
@@ -345,7 +351,8 @@ try {
   await evalIn(table, `clearDoc()`);
 
   await evalIn(table, `${HELPERS} tapDeck('.deck-card')`);
-  ok(await evalIn(table, `${HELPERS} until(() => docText().includes('the west door') && sheetStatus().includes('picked up from the deck'), 4000)`, true), 'a tap hands the card back to the pen');
+  ok(await evalIn(table, `${HELPERS} until(() => docText().includes('the west door'), 4000)`, true),
+    'a tap hands the card back to the pen — and says nothing about it, the page having changed under your eyes (D167)');
   ok(await evalIn(table, `__view.hasFocus && __view.state.selection.main.head === __view.state.doc.length`), 'picked up means in hand — the editor holds the pen at the end (D99)');
   await evalIn(table, `${HELPERS} act('push to table')`);
   ok(await evalIn(table, `${HELPERS} until(() => {

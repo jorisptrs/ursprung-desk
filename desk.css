@@ -334,6 +334,34 @@ html.rig, html.rig body { cursor: none; }
 
 .kind--failure .card__by { color: color-mix(in srgb, var(--ashen-ink) 88%, transparent); }
 
+/* What a register is for, said on hover. Not the browser's own tooltip: that
+   waits about a second before it appears, which is long enough that nobody who
+   is deciding between three words ever sees it. This one is immediate. */
+[data-means] { position: relative; }
+
+[data-means]::after {
+  content: attr(data-means);
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 0.5em);
+  z-index: 40;
+  width: max-content;
+  max-width: 22em;
+  padding: 0.35em 0.6em;
+  border-radius: 3px;
+  background: #221c14;
+  color: var(--parchment);
+  font-size: 0.82em;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 90ms ease 40ms; /* almost at once, but not on a passing cursor */
+}
+
+[data-means]:hover::after, [data-means]:focus-visible::after { opacity: 1; }
+
 /* ---- the ? on the table (D77, amended): tappable by any visitor ---- */
 
 .keys-btn {
@@ -342,17 +370,6 @@ html.rig, html.rig body { cursor: none; }
   bottom: 2%;
   font-size: max(2.8cqmin, 19px);
   color: rgba(240, 235, 224, 0.6); /* warm white — findable, not glaring */
-  user-select: none;
-  z-index: 890;
-}
-
-/* the + in the other quiet corner (D91): the hand door's own door, the ?'s mirror */
-.add-btn {
-  position: absolute;
-  left: 1.6%;
-  bottom: 2%;
-  font-size: max(2.8cqmin, 19px);
-  color: rgba(240, 235, 224, 0.6);
   user-select: none;
   z-index: 890;
 }
@@ -414,14 +431,6 @@ html.rig, html.rig body { cursor: none; }
   letter-spacing: 0.01em;
 }
 
-.card__caption {
-  margin-top: 0.3em;
-  font-size: 0.7em;
-  line-height: 1.35;
-  color: var(--ink-muted);
-  letter-spacing: 0.02em;
-}
-
 /* traces */
 
 .trace--sentence {
@@ -466,17 +475,13 @@ html.rig, html.rig body { cursor: none; }
 
 /* the fold's linework may run nearly full-bleed (§5) */
 .card--fold .card__front { padding: 0.35em; }
-.card--fold .card__title, .card--fold .card__caption { padding: 0 0.55em 0.35em; }
-
-/* the failure register: ashen, with its own dignity (§3); piled in Claude's
+.card--fold .card__title, .card--fold /* the failure register: ashen, with its own dignity (§3); piled in Claude's
    corner and stamped as its reject (D9 amended) */
 .kind--failure {
   background: var(--ashen);
   color: var(--ashen-ink);
 }
-.kind--failure .card__caption { color: rgba(80, 77, 71, 0.75); }
-
-.kind--failure .card__front { padding-top: 2.1em; } /* the stamp keeps its own band */
+.kind--failure .kind--failure .card__front { padding-top: 2.1em; } /* the stamp keeps its own band */
 
 /* "failure" printed horizontal; "Claude" stamped diagonally across it, its
    middle over the word's start — a stamp on print (D9). Set in the wordmark's
@@ -663,7 +668,31 @@ html.rig, html.rig body { cursor: none; }
 
 /* the editor's lines and widgets on the parchment (D96/D98) */
 
-.desk-title { font-size: 1.15em; letter-spacing: 0.01em; }
+/* the writing itself, at a reading measure and in the table's own hand */
+.editor .cm-content {
+  font-family: inherit;
+  font-size: 1.02em;
+  line-height: 1.5;
+  max-width: 34em;
+}
+
+/* a long work scrolls inside the page rather than pushing the sheet down the
+   screen — a poem carried in as a file can be a hundred lines */
+.editor .cm-scroller { max-height: 26em; }
+
+/* The page and the card should feel like one thing (keeper's ruling): what you
+   write IS the work, so it is set the way the card will set it — a reading
+   measure in the table's own serif — and the title stands apart from it rather
+   than merely bigger. So a poem pasted in looks like a poem while it is being
+   pasted, not like a form field. */
+.desk-title {
+  display: inline-block;
+  font-size: 1.24em;
+  line-height: 1.25;
+  letter-spacing: 0.005em;
+  padding-bottom: 0.12em;
+  border-bottom: 1px solid rgba(43, 36, 24, 0.16); /* a rule under a heading, as on paper */
+}
 
 .desk-mention { /* a name wears a quiet pill */
   color: #6f5a33;

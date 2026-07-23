@@ -364,3 +364,27 @@ test('the same table folds to the same places however many times it is asked', (
   const evs = [person('a-1', ['E.']), person('a-2', ['M.']), person('a-3', ['E.', 'M.']), person('a-4', ['N.'])];
   assert.deepEqual(fold(evs, pastEnd(evs)).places, fold(evs, pastEnd(evs)).places);
 });
+
+test('a withdrawal takes the work off the table, not the person out of the room (D170)', () => {
+  const evs = [person('a-1', ['E.']), person('a-2', ['E.', 'M.']), { e: 'retire', night: 1, id: 'a-2' }];
+  const s = fold(evs, pastEnd(evs));
+  const m = s.studios.find((x) => x.name === 'M.');
+  assert.ok(m, 'M. was here, and the log still says so');
+  assert.equal(m.held, 0, 'with nothing standing in it');
+  assert.equal(s.threads.length, 0, 'and no thread left hanging from the work that went');
+
+  // And with a night's arrangement standing — the castle's own case, once the
+  // map has been drawn once — a withdrawal moves nothing at all. It is a quiet
+  // act, and the table treats it as one.
+  const before = fold(evs.slice(0, 2), pastEnd(evs.slice(0, 2)));
+  const arranged = [...evs.slice(0, 2), { e: 'arrange', night: 1, places: before.places }, evs[2]];
+  const after = fold(arranged, pastEnd(arranged));
+  for (const name of ['E.', 'M.']) {
+    assert.deepEqual(after.places[name], before.places[name], `${name} did not move when a-2 was withdrawn`);
+  }
+  // before any arrangement the fold is solving the room itself, so the space the
+  // shared work held is given back — a nudge, the mirror of a new stack arriving
+  const bare = Math.max(...['E.', 'M.'].map((n) => Math.hypot(
+    before.places[n][0] - s.places[n][0], before.places[n][1] - s.places[n][1])));
+  assert.ok(bare < 0.16, `un-arranged, the table gives the room back (${bare.toFixed(3)})`);
+});

@@ -215,7 +215,7 @@ async function main() {
   };
   field.addEventListener('pointerdown', (event) => {
     if (rig || event.button !== 0) return;
-    if (event.target.closest('.card, a, .keys-btn, .add-btn')) return;
+    if (event.target.closest('.card, a, .keys-btn')) return;
     if (view.pileOpen()) return; // the press that shuts a pile does not also step the stream
     startScrub('step');
   });
@@ -285,18 +285,11 @@ async function main() {
     if (key === 'ArrowRight' || key === '>' || key === '.' || key === 'ArrowLeft' || key === '<' || key === ',') stopScrub();
   });
 
-  // The + in the pool's other quiet corner (D91): the hand door's own door,
-  // the ?'s mirror. Tapping it opens the sheet.
-  const addBtn = document.createElement('div');
-  addBtn.className = 'add-btn';
-  addBtn.textContent = '+';
-  addBtn.addEventListener('pointerdown', () => warmEditor()); // the editor module is on its way before the tap lands
-  addBtn.addEventListener('click', (event) => {
-    event.stopPropagation();
-    openTheSheet();
-  });
-  field.append(addBtn);
-  setTimeout(() => warmEditor(), 800); // the module is warm long before anyone reaches for the +
+  // No + in the corner (keeper's ruling, retires D91's glyph): the way in is
+  // space or enter, and the ? says so. A mark on the wood that only means "there
+  // is a feature here" is the kind of chrome this table does without — the hand
+  // door people actually use is the one on their own phone.
+  setTimeout(() => warmEditor(), 800); // warm long before anyone reaches for the keys
 
   // Dropping a file anywhere on the table opens the sheet pre-filled (D79) —
   // the sheet's own drop zone handles drops while it is open.
