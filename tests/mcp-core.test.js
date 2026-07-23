@@ -167,12 +167,17 @@ test('a card too heavy for a line is refused before the stream sees it', () => {
   assert.equal(lines(root).length, 0);
 });
 
-test('backs shelving files is August, and says so rather than dropping them', () => {
-  const { root, still } = fixture();
-  const msg = words(() => createDeskSink({ root }).deposit(
-    buildArtifact({ media: 'note', kind: 'work', people: ['R.'], title: 'x' }), { 'piece:0': still },
-  ));
-  assert.match(msg, /stage→confirm/);
+test('a file shelved on a back lands beside the log, in the slot the sheet left null', () => {
+  const { root } = fixture();
+  const artifact = buildArtifact({ media: 'note', kind: 'work', people: ['R.'], title: 'x' });
+  artifact.detail = { composition: [{ t: 'file', name: 'notes.txt', src: null }] };
+  const { event } = createDeskSink({ root, prefix: 'h' }).deposit(artifact, {
+    'piece:0': { name: 'notes.txt', type: 'text/plain', bytes: Buffer.from('the fold, again') },
+  });
+  const at = event.artifact.detail.composition[0].src;
+  assert.match(at, /^drop\/assets\/h-\d+-0\.txt$/, 'the slot points at a file, not at bytes');
+  assert.equal(readFileSync(join(root, at), 'utf8'), 'the fold, again');
+  assert.match(event.artifact.id, /^h-/, 'the hand door numbers its own');
 });
 
 test('a torn last line is not yet a line; a damaged one is skipped, not fatal', () => {
