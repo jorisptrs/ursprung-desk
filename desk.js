@@ -3,6 +3,9 @@
 // moving is one queue job (D13). Boot modes: deployed (the D12 opening pass,
 // deferred while hidden, then live) · ?rig (held, driver, no cursor) ·
 // ?specimens (still life) · ?cursor=k (deterministic screenshot surface).
+// Two local-only flags for the MCP door: ?live watches the drop file (D105),
+// ?tail=k holds the stream's last k events back until m (D111). Neither is
+// ever on the deployed link, and neither keys off ?rig.
 
 import { createStream } from './js/stream.js';
 import { fold, eventTime } from './js/fold.js';
@@ -11,6 +14,7 @@ import { createQueue, sleep } from './js/queue.js';
 import { createView } from './js/view.js';
 import { attachDriver, attachHelper } from './js/driver.js';
 import { openSheet, directSink, attachBroadcastReceiver, warmEditor } from './js/deposit.js';
+import { attachLivePickup } from './js/live.js';
 
 const params = new URLSearchParams(location.search);
 const field = document.getElementById('field');
@@ -27,7 +31,12 @@ async function loadEvents() {
 }
 
 async function main() {
-  for (const ev of await loadEvents()) stream.append(ev);
+  // ?tail=k holds the stream's last k events off the table until m lands them
+  // (D111) — so a live MCP deposit can precede the meta card in one take (D52).
+  const loaded = await loadEvents();
+  const tailCount = Math.min(Math.max(0, parseInt(params.get('tail'), 10) || 0), loaded.length);
+  const heldTail = tailCount ? loaded.slice(loaded.length - tailCount) : [];
+  for (const ev of tailCount ? loaded.slice(0, loaded.length - tailCount) : loaded) stream.append(ev);
 
   const rig = params.has('rig');
   const view = createView(field, { rig });
@@ -114,6 +123,38 @@ async function main() {
   });
   stream.onAppend(() => tl.dispatch('appended', events().length));
 
+  // The MCP door's end of the pipe (D105): ?live watches the file the server
+  // appends to. Local views only — never the deployed link — and gated on the
+  // flag alone, so ?rig&live and a later ?film compose without a branch here.
+  // While the table is held a picked-up card simply waits: 'appended' rests
+  // silent there, and the next → or d shows it.
+  if (params.has('live')) attachLivePickup(stream);
+
+  // The held-back tail (D111): m lands what ?tail kept off the table. The
+  // append alone drains in live; held, the release steps once per event, since
+  // 'appended' does nothing there. The events are the seed's own — conducting,
+  // never fabricating (D26).
+  const landTail = () => {
+    if (!heldTail.length) return;
+    let landed = 0;
+    for (const ev of heldTail.splice(0, heldTail.length)) {
+      try {
+        stream.append(ev);
+        landed += 1;
+      } catch (err) { // one event the stream won't take must not swallow the rest
+        console.warn(`desk: a held event could not land — ${err?.message ?? err}`);
+      }
+    }
+    if (tl.state.mode === 'held') for (let i = 0; i < landed; i++) tl.dispatch('step', events().length);
+  };
+  if (tailCount) {
+    addEventListener('keydown', (event) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
+      if (document.querySelector('.sheet')) return; // an open sheet takes the keyboard
+      if (event.key.toLowerCase() === 'm') landTail();
+    });
+  }
+
   // The flip (D73): a clean tap on a backed card turns it at any moment —
   // mid-deal it simply takes its turn in the queue between arrivals. A drag,
   // or a live text selection, is reading — it never flips or closes (D92).
@@ -188,6 +229,7 @@ async function main() {
   };
   attachHelper(field, {
     withKeys: rig,
+    tail: tailCount > 0, // the m row stands only while a tail is held (D111)
     deal: rig ? null : {
       label: () => (tl.state.mode === 'held' ? 'mode: manual — d resumes auto' : 'mode: auto — d pauses'),
       toggle: toggleDeal,

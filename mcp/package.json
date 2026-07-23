@@ -1,0 +1,10 @@
+{
+  "name": "desk-mcp",
+  "private": true,
+  "type": "module",
+  "description": "The desk's deposit door — local stdio MCP server (BRIEF §6, D34).",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "3.25.76"
+  }
+}

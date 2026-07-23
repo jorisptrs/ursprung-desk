@@ -194,3 +194,37 @@ test('pacing shapes: rest before the first event, beats between nights, cadence 
   assert.deepEqual(pacing(live, fakeEvents, 0), { delayBefore: 0, wait: 0 }, 'outside the pass a placement is immediate (D87)');
   assert.ok(PASS_MS >= 12000 && PASS_MS <= 18000, 'budget itself sits in the D12 window');
 });
+
+test('a card picked up while held waits for the next step; live walks it on (D105)', () => {
+  // The MCP door appends to the log at any moment. Held, that is not motion:
+  // the table stands where the keeper left it until they ask for the next card.
+  const held = { ...initialState({ after: 'live' }), mode: 'held', cursor: N, target: N };
+  let r = reduce(held, 'appended', N + 1);
+  assert.equal(r.effects.length, 0, 'held: nothing moves on its own');
+  assert.equal(r.state.target, N, 'and the new card is not even pending');
+  r = reduce(r.state, 'step', N + 1);
+  assert.equal(r.state.target, N + 1);
+  assert.deepEqual(r.effects, ['finish', 'drain'], 'the next → shows it');
+
+  // d from a full held table re-deals the whole stream, the new card included
+  const redeal = reduce(held, 'replay', N + 1);
+  assert.deepEqual([redeal.state.cursor, redeal.state.target], [0, N + 1], 'and a re-deal re-enacts it in place (D28)');
+
+  // live is the deployed rest state: it arrives on its own, within a poll
+  const live = { ...initialState({ after: 'live' }), mode: 'live', cursor: N, target: N };
+  r = reduce(live, 'appended', N + 1);
+  assert.equal(r.state.target, N + 1);
+  assert.deepEqual(r.effects, ['drain']);
+});
+
+test('the held tail lands by stepping once per event (D111)', () => {
+  // desk.js appends the held events, then steps once each while held — the
+  // release is the seed's own order, so meta still lands last.
+  let s = { ...initialState({ after: 'live' }), mode: 'held', cursor: N, target: N };
+  const afterAppend = N + 1; // one event released
+  s = reduce(s, 'appended', afterAppend).state;
+  assert.equal(s.target, N, 'the append alone does not move a held table');
+  const r = reduce(s, 'step', afterAppend);
+  assert.equal(r.state.target, afterAppend, 'the step is what lands it');
+  assert.deepEqual(r.effects, ['finish', 'drain']);
+});

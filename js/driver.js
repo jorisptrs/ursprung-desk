@@ -74,7 +74,7 @@ const VISITOR_KEYS = [
   ['?', 'this help', true],
 ];
 
-export function attachHelper(field, { withKeys = false, deal = null } = {}) {
+export function attachHelper(field, { withKeys = false, deal = null, tail = false } = {}) {
   const button = document.createElement('div');
   button.className = 'keys-btn';
   button.textContent = '?';
@@ -112,6 +112,10 @@ export function attachHelper(field, { withKeys = false, deal = null } = {}) {
       dealLabel.textContent = deal.label();
     });
   }
+
+  // Only while ?tail actually holds something back (D111) — a local flag for
+  // the one-take shoot, never on the deployed page.
+  if (tail) addRow('m', 'land the held tail', true);
 
   for (const [key, label, kbd] of GESTURES) addRow(key, label, kbd);
   if (!withKeys) addRow('+', 'add your work', false); // the bottom-left door (D91) — named here, lived there
