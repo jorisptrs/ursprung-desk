@@ -9,7 +9,7 @@ import {
   siteCardSvg, linkExcerpt, normalizeUrl, stripExt, slashTokenAt, refLineChange,
   classifyLine, parseDoc, composeDoc, migrateSheet, extractTitle, resolveFront,
   composeArtifact, validateArtifact, allocate, materialize, directSink, pageMeta,
-  hasTitleLine, doorRefusal, deckSpread, withoutSignature, mentionSpans,
+  hasTitleLine, doorRefusal, deckSpread, withoutSignature, mentionSpans, readsAsWriting,
 } from '../js/deposit.js';
 import { createStream } from '../js/stream.js';
 
@@ -455,4 +455,15 @@ test('a signature is names, not prose — it is read and then it goes (D160)', (
   assert.deepEqual(artifact.people, ['E.', 'Y.'], 'the names were read before the line went');
   assert.equal(artifact.excerpt.text, 'the zither, restrung', 'and the face says them once, on its own line');
   assert.equal(artifact.caption, undefined);
+});
+
+test('writing carried in as a file is writing (D168)', () => {
+  const asFile = (name, type, size = 100) => ({ name, type, size });
+  assert.ok(readsAsWriting(asFile('the poem.txt', 'text/plain')));
+  assert.ok(readsAsWriting(asFile('notes.md', '')), 'by name where the device says nothing');
+  assert.ok(readsAsWriting(asFile('run.py', '')));
+  assert.ok(!readsAsWriting(asFile('a.png', 'image/png')));
+  assert.ok(!readsAsWriting(asFile('take.mp4', 'video/mp4')));
+  assert.ok(!readsAsWriting(asFile('the novel.txt', 'text/plain', 900_000)), 'a novel is a file, not a card');
+  assert.ok(!readsAsWriting(null));
 });

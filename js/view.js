@@ -29,7 +29,11 @@ const OPEN_H_FRAC = 0.86; // the tallest a card in hand may stand
 const FONT_OF_W = 0.075; // a card's type, as a fraction of its width — laid or in hand
 const PIECE_MAX_FRAC = 0.66; // of that: a still shares its leaf, never takes it whole (D102)
 
-const threadKey = (t) => `${t.from}→${t.to ?? (t.toPlace ?? []).join(',')}`;
+// A thread's identity is its two ends, and an anchor's far end is the STUDIO it
+// hangs from — never that studio's coordinates, which change every time the map
+// is redrawn. Keying on the place meant a rearrangement destroyed every anchor
+// and built new ones in their stead, so they blinked instead of travelling.
+const threadKey = (t) => `${t.from}→${t.to ?? `@${t.toStack ?? ''}`}`;
 
 export function createView(field, { rig = false } = {}) {
   const cardEls = new Map(); // artifact id → element
@@ -130,6 +134,7 @@ export function createView(field, { rig = false } = {}) {
   // so nothing but the compositor is asked to work.
   const MOVE_MS = 620;
   let boxesBefore = null;
+  let threadsBefore = null;
   let instant = false; // the still surfaces never travel (D62)
 
   // Whether anything has been rearranged, asked of the fold's own places rather
@@ -149,12 +154,27 @@ export function createView(field, { rig = false } = {}) {
   function watchMoves() {
     boxesBefore = new Map();
     for (const [id, el] of cardEls) boxesBefore.set(id, el.getBoundingClientRect());
+    // and the strings, which are px and re-laid rather than re-flowed: without
+    // this they snapped to where the piles are going while the piles were still
+    // on their way, which is the one thing that made a move look wrong
+    threadsBefore = new Map();
+    for (const [key, el] of threadEls) {
+      if (el.style.display !== 'none' && el.style.transform) threadsBefore.set(key, el.style.transform);
+    }
   }
 
   function playMoves() {
     const before = boxesBefore;
+    const strings = threadsBefore;
     boxesBefore = null;
+    threadsBefore = null;
     if (!before || rig) return;
+    for (const [key, el] of threadEls) {
+      const was = strings?.get(key);
+      const now = el.style.transform;
+      if (!was || !now || was === now || el.style.display === 'none') continue;
+      track(el.animate([{ transform: was }, { transform: now }], { duration: MOVE_MS, easing: EASE }));
+    }
     for (const [id, el] of cardEls) {
       const was = before.get(id);
       if (!was) continue; // it was not on the table a moment ago: an arrival, which snaps
@@ -456,69 +476,86 @@ export function createView(field, { rig = false } = {}) {
 
   // ---- reconcile ----
 
-  function reconcile(state) {
-    if (!instant && boxesBefore === null && placesMoved(lastState, state)) watchMoves();
-    const seenCards = new Set();
-    const moving = boxesBefore !== null;
-    state.cards.forEach((card, i) => {
-      let el = cardEls.get(card.id);
+  // Three layers, kept in step with the fold by the same pattern each time: make
+  // what is new, settle what stands, remove what the state no longer names.
+  function keepInStep(want, els, make, settle, parent) {
+    const seen = new Set();
+    for (const [key, item] of want) {
+      let el = els.get(key);
       if (!el) {
-        el = renderCard(card.artifact, { rig });
+        el = make(item);
+        els.set(key, el);
+        parent.append(el);
+      }
+      settle(el, item);
+      seen.add(key);
+    }
+    for (const [key, el] of els) {
+      if (seen.has(key)) continue;
+      el.remove();
+      els.delete(key);
+    }
+  }
+
+  function reconcileCards(state) {
+    const z = new Map(state.cards.map((c, i) => [c.id, i + 1]));
+    const gone = new Set(cardEls.keys());
+    for (const c of state.cards) gone.delete(c.id);
+    // a retired card leaves the hand too, before its element is taken away
+    for (const id of gone) if (id === flippedId) { flippedId = null; stopExperience(id); }
+    keepInStep(
+      state.cards.map((c) => [c.id, c]),
+      cardEls,
+      (card) => {
+        const el = renderCard(card.artifact, { rig });
         wirePlayers(el);
         el.dataset.id = card.id;
-        cardEls.set(card.id, el);
-        field.append(el);
-      }
-      settleCard(el, card, i + 1);
-      seenCards.add(card.id);
-    });
-    for (const [id, el] of cardEls) {
-      if (!seenCards.has(id)) {
-        if (id === flippedId) { flippedId = null; stopExperience(); } // a retired card leaves the hand too
-        el.remove();
-        cardEls.delete(id);
-      }
-    }
-    const seenStudios = new Set();
-    for (const studio of state.studios ?? []) {
-      let el = markEls.get(studio.name);
-      if (!el) {
-        el = document.createElement('div');
+        return el;
+      },
+      (el, card) => settleCard(el, card, z.get(card.id)),
+      field,
+    );
+  }
+
+  function reconcileStudios(state) {
+    keepInStep(
+      (state.studios ?? []).map((s) => [s.name, s]),
+      markEls,
+      (studio) => {
+        const el = document.createElement('div');
         el.className = 'studio';
         el.textContent = `@${studio.name}`;
-        markEls.set(studio.name, el);
-        marks.append(el);
-      }
-      el.style.left = `${(studio.place[0] * 100).toFixed(2)}%`;
-      el.style.top = `${(studio.place[1] * 100).toFixed(2)}%`;
-      el.dataset.held = String(studio.held);
-      seenStudios.add(studio.name);
-    }
-    for (const [name, el] of markEls) {
-      if (seenStudios.has(name)) continue;
-      el.remove();
-      markEls.delete(name);
-    }
+        return el;
+      },
+      (el, studio) => {
+        el.style.left = `${(studio.place[0] * 100).toFixed(2)}%`;
+        el.style.top = `${(studio.place[1] * 100).toFixed(2)}%`;
+        el.dataset.held = String(studio.held);
+      },
+      marks,
+    );
+  }
 
-    const seenThreads = new Set();
-    for (const thread of state.threads) {
-      const key = threadKey(thread);
-      let el = threadEls.get(key);
-      if (!el) {
-        el = document.createElement('div');
+  function reconcileThreads(state) {
+    keepInStep(
+      state.threads.map((t) => [threadKey(t), t]),
+      threadEls,
+      () => {
+        const el = document.createElement('div');
         el.className = 'thread';
-        threadEls.set(key, el);
-        layer.append(el);
-      }
-      settleThread(el, thread, state);
-      seenThreads.add(key);
-    }
-    for (const [key, el] of threadEls) {
-      if (!seenThreads.has(key)) {
-        el.remove();
-        threadEls.delete(key);
-      }
-    }
+        return el;
+      },
+      (el, thread) => settleThread(el, thread, state),
+      layer,
+    );
+  }
+
+  function reconcile(state) {
+    if (!instant && boxesBefore === null && placesMoved(lastState, state)) watchMoves();
+    const moving = boxesBefore !== null;
+    reconcileCards(state);
+    reconcileStudios(state); // after the cards: a mark is read only where its pile is empty
+    reconcileThreads(state); // and last, since a thread is measured off both
     // While something is being read, the rest of the table steps back a little.
     // Brightness, never opacity — opacity is how the table says age (D14), and
     // two meanings on one channel is how a legend gets invented.

@@ -70,7 +70,7 @@ const VISITOR_KEYS = [
   ['→', 'next card — hold to rush', true],
   ['←', 'take cards back — hold to rush', true],
   ['r', 'clear the table', true],
-  ['enter / space', 'add your work', true], // a held space still rushes ahead (D99)
+  ['space or enter', 'add your work', true], // a held space still rushes ahead (D99)
   ['?', 'this help', true],
 ];
 
@@ -118,7 +118,6 @@ export function attachHelper(field, { withKeys = false, deal = null, tail = fals
   if (tail) addRow('m', 'land the held tail', true);
 
   for (const [key, label, kbd] of GESTURES) addRow(key, label, kbd);
-  if (!withKeys) addRow('+', 'add your work', false); // the bottom-left door (D91) — named here, lived there
 
   const close = () => panel.classList.remove('open');
   const toggle = () => {

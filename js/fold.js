@@ -104,6 +104,7 @@ export function fold(events, t) {
   let maxNight = 0;
   let places = null; // the latest arrangement at or before t
   const enrolled = []; // the cohort the curator registered, in the order they were
+  const named = []; // and everyone the log has named since, in the order it named them
   for (const { ev, i } of arrived) {
     if (Number.isInteger(ev.night) && ev.night > maxNight) maxNight = ev.night;
     if (ev.e === 'arrange') {
@@ -127,6 +128,12 @@ export function fold(events, t) {
     if (ev.e !== 'deposit') continue;
     const a = ev.artifact;
     const makers = humansOf(a);
+    // Everyone the log has ever named keeps their place, whether or not the card
+    // that named them still stands: a withdrawal takes the work off the table,
+    // not the person out of the room, and a studio winking out would shuffle
+    // the map for everybody else at the worst possible moment.
+    for (const name of makers) if (!named.includes(name)) named.push(name);
+    if (!makers.length && !named.includes(CLAUDE)) named.push(CLAUDE);
     live.push({
       id: a.id,
       artifact: a,
@@ -145,10 +152,7 @@ export function fold(events, t) {
   // Everyone the curator registered stands here from the first moment, in the
   // order they were registered; the log's own names follow.
   const studios = [...enrolled];
-  for (const c of live) {
-    for (const name of c.makers) if (!studios.includes(name)) studios.push(name);
-    if (!c.makers.length && !studios.includes(CLAUDE)) studios.push(CLAUDE);
-  }
+  for (const name of named) if (!studios.includes(name)) studios.push(name);
   // Every stack on the table, before any of them is placed: a studio for each
   // person, and one shared place for each set of hands that worked together.
   const floats = new Map(); // maker-set → the shared works of those hands
