@@ -60,14 +60,38 @@ export function inferWordsMedia(text) {
 
 // @-mentions name people (D88): parsed from the text as written, kept in the
 // text — the mention is the authorship note. Order of appearance, deduped.
-export function parseMentions(texts) {
+//
+// A name the room knows wins over the bare-word rule, spaces and all, so
+// "Joris Peters" is one person rather than "Joris" (keeper's ruling
+// 2026-07-23). Longest first, so a room holding both "Joris" and "Joris
+// Peters" reads the longer one. Everyone else still parses the simple way,
+// because someone in a studio may not be in the cohort at all — and the
+// preview shows what was read either way.
+export function parseMentions(texts, roster = []) {
+  const known = [...new Set((roster ?? []).map((n) => String(n ?? '').trim()).filter(Boolean))]
+    .sort((a, b) => b.length - a.length);
   const people = [];
+  const take = (name) => { if (name && !people.includes(name)) people.push(name); };
+
   for (const t of Array.isArray(texts) ? texts : [texts]) {
-    for (const m of String(t ?? '').matchAll(/@([\p{L}][\p{L}\d._'-]*)/gu)) {
+    const s = String(t ?? '');
+    for (let i = s.indexOf('@'); i >= 0; i = s.indexOf('@', i + 1)) {
+      const rest = s.slice(i + 1);
+      const hit = known.find((n) => rest.slice(0, n.length).toLowerCase() === n.toLowerCase()
+        // a name ends where a word ends: "@Ana" must not swallow "@Anastasia"
+        && !/[\p{L}\d]/u.test(rest.charAt(n.length)));
+      if (hit) {
+        take(hit);
+        i += hit.length;
+        continue;
+      }
+      const m = /^([\p{L}][\p{L}\d._'-]*)/u.exec(rest);
+      if (!m) continue;
       let name = m[1];
       // a sentence's full stop is not part of the name — initials keep theirs
       if (name.endsWith('.') && !/^(\p{L}\.)+$/u.test(name)) name = name.slice(0, -1);
-      if (name && !people.includes(name)) people.push(name);
+      take(name);
+      i += m[1].length;
     }
   }
   return people;
@@ -263,9 +287,9 @@ export function parseDoc(docText, pieces = new Map(), linkMeta = new Map()) {
 }
 
 // The whole sheet → one artifact: parse, then the untouched composition.
-export function composeDoc({ docText = '', pieces = new Map(), linkMeta = new Map(), kind = 'work', practice = '', frontPieceId = null }) {
+export function composeDoc({ docText = '', pieces = new Map(), linkMeta = new Map(), kind = 'work', practice = '', frontPieceId = null, roster = [] }) {
   const { blocks, unknownRefs } = parseDoc(docText, pieces, linkMeta);
-  const out = composeArtifact({ kind, practice, blocks, frontPieceId, frontTextId: null });
+  const out = composeArtifact({ kind, practice, blocks, frontPieceId, frontTextId: null, roster });
   return { ...out, unknownRefs };
 }
 
@@ -403,11 +427,11 @@ export function resolveFront({ title = '', blocks = [], frontPieceId = null, fro
   return { piece, textBlock }; // textBlock null → the title (if any) is the front's text
 }
 
-export function composeArtifact({ practice = '', kind = 'work', blocks: rawBlocks = [], frontPieceId = null, frontTextId = null }) {
+export function composeArtifact({ practice = '', kind = 'work', blocks: rawBlocks = [], frontPieceId = null, frontTextId = null, roster = [] }) {
   const { title, blocks } = extractTitle(rawBlocks);
   const { piece, textBlock } = resolveFront({ title, blocks, frontPieceId, frontTextId });
   const frontText = textBlock ? textBlock.text.trim() : title.trim();
-  const people = parseMentions(blocks.filter((b) => b.t === 'text').map((b) => b.text));
+  const people = parseMentions(blocks.filter((b) => b.t === 'text').map((b) => b.text), roster);
 
   const artifact = {
     kind,
@@ -749,9 +773,50 @@ const mintId = () => (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`)
 let editorModule = null;
 export const warmEditor = () => { editorModule ??= import('./editor.js'); return editorModule; };
 
+// The one QR opens this (keeper's ruling 2026-07-23): the room's cohort, and
+// you tap your own name. The device remembers it from then on, so this happens
+// once per device rather than once per card — and a person may claim on as
+// many devices as they carry. Resolves with what the room handed back.
+//
+// Deliberately spare: the desk does not instruct, and a column of the names of
+// people you are living with, one of them yours, explains itself.
+export function claimGate({ container = document.body, people = [], onClaim }) {
+  return new Promise((resolve) => {
+    const gate = h('section', 'sheet sheet--page sheet--gate');
+    const panel = h('div', 'sheet__panel');
+    const head = h('div', 'sheet__head');
+    head.append(h('div', 'sheet__heading', 'the desk'));
+    panel.append(head, h('div', 'sheet__label', 'your name'));
+
+    const list = h('div', 'gate__names');
+    const status = h('div', 'sheet__status');
+    let busy = false;
+    for (const name of people) {
+      const opt = h('span', 'sheet__opt gate__name', name);
+      opt.addEventListener('click', async () => {
+        if (busy) return;
+        busy = true;
+        try {
+          const got = await onClaim(name);
+          gate.remove();
+          resolve(got);
+        } catch (err) {
+          busy = false;
+          status.textContent = String(err?.message ?? err);
+        }
+      });
+      list.append(opt);
+    }
+    if (!people.length) status.textContent = 'this room has no cohort yet';
+    panel.append(list, status);
+    gate.append(panel);
+    container.append(gate);
+  });
+}
+
 export function openSheet({
   mode = 'overlay', container = document.body, sink, prefill = null, tray = null, autofocus = true,
-  me = null, people = [],
+  me = null, people = [], onRename = null,
 } = {}) {
   tray = tray ?? createTray(createBrowserBackend());
 
@@ -773,6 +838,41 @@ export function openSheet({
 
   const head = h('div', 'sheet__head');
   head.append(h('div', 'sheet__heading', 'add your work'));
+  // Whose sheet this is, and a way to be called something else. A rename binds
+  // what comes after: cards already laid keep the name they were laid under,
+  // because the log is never rewritten.
+  if (me && onRename) {
+    const who = h('span', 'sheet__who', me);
+    who.title = 'change your name';
+    who.addEventListener('click', () => {
+      const field = h('input', 'sheet__field sheet__who-field');
+      field.value = me;
+      const commit = async () => {
+        const wanted = field.value.trim();
+        field.replaceWith(who);
+        if (!wanted || wanted === me) return;
+        try {
+          me = await onRename(wanted);
+          who.textContent = me;
+          state.docText = signedPage(me);
+          if (ed) ed.setText(state.docText, { caretAt: 0 });
+          refreshPreviews();
+          say('');
+        } catch (err) {
+          say(String(err?.message ?? err));
+        }
+      };
+      field.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        if (e.key === 'Escape') { e.preventDefault(); field.replaceWith(who); }
+      });
+      field.addEventListener('blur', commit);
+      who.replaceWith(field);
+      field.focus();
+      field.select();
+    });
+    head.append(who);
+  }
   if (mode === 'overlay') {
     const closeBtn = h('span', 'sheet__action', 'close');
     closeBtn.addEventListener('click', () => close());
@@ -872,6 +972,7 @@ export function openSheet({
     kind: state.kind,
     practice: practice.value,
     frontPieceId: state.frontPieceId,
+    roster: people, // a name the room knows is read whole, spaces and all
   });
 
   function face(card, label, hint) {

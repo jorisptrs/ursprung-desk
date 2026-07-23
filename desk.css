@@ -453,6 +453,41 @@ html.rig, html.rig body { cursor: none; }
   color: rgba(232, 220, 196, 0.9);
 }
 
+/* whose sheet this is (keeper's ruling): quiet at the head, tappable to be
+   called something else — a rename binds what comes after, never what is laid */
+.sheet__who {
+  cursor: pointer;
+  font-size: 0.9em;
+  color: rgba(232, 220, 196, 0.55);
+  border-bottom: 1.5px solid rgba(196, 154, 88, 0.25);
+  user-select: none;
+}
+
+.sheet__who:hover { color: rgba(220, 196, 150, 0.95); }
+.sheet__who-field { max-width: 10em; }
+
+/* a laptop that has claimed is shown its own line for a session; on a phone it
+   is a quiet footnote nobody has to read */
+.sheet__mcpline {
+  max-width: 46rem;
+  margin: 0.6rem auto 2rem;
+  padding: 0 1.2rem;
+  font: 0.7rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: rgba(232, 220, 196, 0.32);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* the one QR opens the cohort, and you tap your own name */
+.gate__names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55em 1.1em;
+  margin: 0.7em 0 0.4em;
+}
+
+.gate__name { font-size: 1.05em; }
+
 .sheet__action { /* tappable: the amber underline, as on card backs */
   border-bottom: 1.5px solid rgba(196, 154, 88, 0.85);
   padding-bottom: 0.1em;

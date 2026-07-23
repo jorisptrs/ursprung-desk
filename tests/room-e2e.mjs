@@ -35,11 +35,13 @@ if (!existsSync(join(ROOT, 'mcp', 'node_modules'))) {
 // ---- the room, on its own log so a real desk is never touched ----
 
 const { createRoom, peopleFileIn } = await import('../mcp/room.mjs');
-const TOKEN = 'e2e-token';
 const desk = join(ROOT, 'drop', 'e2e-room');
 rmSync(desk, { recursive: true, force: true });
 mkdirSync(join(desk, 'drop', 'assets'), { recursive: true });
-writeFileSync(peopleFileIn(desk), JSON.stringify({ [TOKEN]: { name: 'E.' } }));
+// a cohort, nobody claimed: the phone will tap its own name, as at the castle
+writeFileSync(peopleFileIn(desk), JSON.stringify({
+  people: [{ name: 'E.', tokens: [] }, { name: 'Joris Peters', tokens: [] }, { name: 'M.', tokens: [] }],
+}));
 writeFileSync(join(desk, 'drop', 'stream.jsonl'), '');
 // the room serves the repo's own page and seed, against its own log
 for (const f of ['index.html', 'deposit.html', 'desk.css', 'desk.js', 'seed.json']) {
@@ -154,11 +156,26 @@ try {
   await shoot(table, '1-table');
 
   // -- the phone: a second window, opened at this person's own door --
-  const opened = await (await fetch(`http://localhost:${CDP}/json/new?${encodeURIComponent(`${base}/deposit.html?t=${TOKEN}`)}`, { method: 'PUT' })).json();
+  // the ONE code — no token in it, the same link everyone in the room scans
+  const opened = await (await fetch(`http://localhost:${CDP}/json/new?${encodeURIComponent(`${base}/deposit.html`)}`, { method: 'PUT' })).json();
   phone = await connect(opened.webSocketDebuggerUrl);
   await phone.send('Runtime.enable');
   await evalIn(phone, UNTIL);
-  ok(await evalIn(phone, 'edReady()', true), 'the QR opens the sheet on the phone');
+
+  // -- the gate: a device the room has not met yet is shown the cohort --
+  const gateUp = await evalIn(phone, 'until(() => document.querySelectorAll(".gate__name").length > 0)', true);
+  ok(gateUp, 'the one code opens the room’s cohort, not a sheet');
+  const offered = await evalIn(phone, '[...document.querySelectorAll(".gate__name")].map((e) => e.textContent)');
+  ok(JSON.stringify(offered) === '["E.","Joris Peters","M."]', `everyone is offered (${JSON.stringify(offered)})`);
+  await shoot(phone, '2-gate');
+
+  // tap your own name, and the device remembers it
+  await evalIn(phone, '[...document.querySelectorAll(".gate__name")].find((e) => e.textContent === "E.").click()');
+  ok(await evalIn(phone, 'edReady()', true), 'tapping a name opens the sheet');
+  ok(!(await evalIn(phone, '!!document.querySelector(".gate__name")')), 'and the gate is gone');
+  const kept = await evalIn(phone, 'localStorage.getItem("desk-room-token")');
+  ok(typeof kept === 'string' && kept.length > 8, 'the device kept its way in');
+  ok(await evalIn(phone, 'document.querySelector(".sheet__who")?.textContent') === 'E.', 'the sheet says whose it is');
 
   // the page opens already signed: the card is E.'s before a word is written
   const opening = await evalIn(phone, '__view.state.doc.toString()');
@@ -214,6 +231,15 @@ try {
   const second = handed.length > 1 ? JSON.parse(handed[1]).artifact : null;
   ok(JSON.stringify(second?.people) === '["Y."]', `replacing the signature hands the card over (${JSON.stringify(second?.people)})`);
 
+  // -- a name the room knows is read whole, spaces and all --
+  await evalIn(phone, "writeCard('# the crease, drawn\\n\\n@Joris Peters')");
+  await sleep(400);
+  await evalIn(phone, "act('push to table')");
+  await sleep(1500);
+  const spaced = readFileSync(join(desk, 'drop', 'stream.jsonl'), 'utf8').split('\n').filter(Boolean);
+  const third = spaced.length > 2 ? JSON.parse(spaced[2]).artifact : null;
+  ok(JSON.stringify(third?.people) === '["Joris Peters"]', `a two-word name is one person (${JSON.stringify(third?.people)})`);
+
   // -- a card nobody signed at all is still refused --
   await evalIn(phone, "writeCard('# a fold that will not close')");
   await sleep(400);
@@ -222,7 +248,7 @@ try {
   const refusal = await evalIn(phone, 'sheetStatus()');
   ok(/author/i.test(refusal), `an unsigned card is refused in words (${refusal || 'nothing said'})`);
   const after = readFileSync(join(desk, 'drop', 'stream.jsonl'), 'utf8').split('\n').filter(Boolean);
-  ok(after.length === 2, 'and the room’s log is unchanged by it');
+  ok(after.length === 3, 'and the room’s log is unchanged by it');
 
   const noise = [...table.noise, ...phone.noise].filter((n) => !/favicon|ERR_FILE/i.test(n));
   ok(noise.length === 0, `consoles clean${noise.length ? ` — ${noise.join(' | ')}` : ''}`);

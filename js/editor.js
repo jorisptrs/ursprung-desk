@@ -330,22 +330,28 @@ export function createDeskEditor({
   // The room, offered at the @ (keeper's ruling). On a communal table the
   // people are the room, and a name picked from the list is spelled the way its
   // owner spells it — which is what keeps `people` one person per name instead
-  // of three spellings of the same one. It offers, it never restricts: an @
-  // followed by anything at all is still a name, because someone in a studio
-  // may not be in the registry at all.
+  // of three spellings of the same one. Picking takes Enter, and puts the whole
+  // name in at once, spaces and all: a name is chosen, not typed letter by
+  // letter, which is what lets "Joris Peters" be one person.
+  //
+  // It offers, it never restricts: an @ followed by anything at all is still a
+  // name, because someone in a studio may not be in the cohort — those parse
+  // the old way, in one word.
   function mentionSource(context) {
     const names = mentions();
     if (!names.length) return null;
     const line = context.state.doc.lineAt(context.pos);
     const before = line.text.slice(0, context.pos - line.from);
-    const at = /(^|\s)@([\p{L}\d._'-]*)$/u.exec(before);
+    // what has been typed since the @ may already hold a space, since a name may
+    const at = /(^|\s)@([\p{L}\d._'\- ]*)$/u.exec(before);
     if (!at) return null;
-    const typed = at[2].toLowerCase();
+    const typed = at[2].trimStart().toLowerCase();
     const offered = names.filter((n) => n.toLowerCase().startsWith(typed));
     if (!offered.length) return null;
     return {
       from: line.from + at.index + at[1].length + 1, // just past the @
-      validFor: /^[\p{L}\d._'-]*$/u,
+      // keep the menu open across a space, so a two-word name can be walked to
+      validFor: /^[\p{L}\d._'\- ]*$/u,
       options: offered.map((name) => ({ label: name, type: 'text' })),
     };
   }
