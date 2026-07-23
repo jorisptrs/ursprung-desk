@@ -70,7 +70,7 @@ const VISITOR_KEYS = [
   ['→', 'next card — hold to rush', true],
   ['←', 'take cards back — hold to rush', true],
   ['r', 'clear the table', true],
-  ['space or enter', 'add your work', true], // a held space still rushes ahead (D99)
+  ['space or enter', 'add your work', true], // the + on the wood does the same (D91)
   ['?', 'this help', true],
 ];
 

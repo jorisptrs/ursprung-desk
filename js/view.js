@@ -73,8 +73,21 @@ export function createView(field, { rig = false } = {}) {
   // hands keeps between them. The fold decided this; the view only reads it.
   const pileKey = (card) => card.pile ?? (card.between ? `~${card.between}` : null);
 
-  const inOpenPile = () =>
-    openPile ? lastState.cards.filter((c) => pileKey(c) === openPile) : [];
+  // What a studio holds, opened (keeper's ruling): everything that person made,
+  // their collaborations included — a quest asked alone and the work that
+  // answered it with somebody else belong to one thread of thinking, and having
+  // to hunt for the second half on a shared place between two piles is exactly
+  // the reading the map was meant to make possible. In the order they were
+  // made, which is the order the log is in.
+  //
+  // A shared place opened on its own shows only what those hands made together:
+  // it is a place two people keep, not a third person.
+  const inSpread = (card) => {
+    if (!openPile) return false;
+    if (pileKey(card) === openPile) return true;
+    return !openPile.startsWith('~') && (card.makers ?? []).includes(openPile);
+  };
+  const inOpenPile = () => (openPile ? lastState.cards.filter(inSpread) : []);
 
   // Where a card of the open pile lies, in px from where it lies stacked. The
   // pile opens to exactly the room its own cards need — a pile of two goes two
@@ -114,7 +127,7 @@ export function createView(field, { rig = false } = {}) {
   }
 
   function spreadOf(card) {
-    if (!openPile || pileKey(card) !== openPile) return null;
+    if (!inSpread(card)) return null;
     return spreadPlan()?.get(card.id) ?? null;
   }
 
@@ -242,7 +255,10 @@ export function createView(field, { rig = false } = {}) {
     el.style.left = `${(card.x * 100).toFixed(2)}%`;
     el.style.top = `${(card.y * 100).toFixed(2)}%`;
     const pivot = el.querySelector('.card__pivot');
-    el.toggleAttribute('data-lit', card.id === flippedId || pileKey(card) === openPile);
+    el.toggleAttribute('data-lit', card.id === flippedId || inSpread(card));
+    // a work made with somebody else is visiting this studio's timeline, not
+    // living in it — marked, so the pile still says which are its own
+    el.toggleAttribute('data-shared', inSpread(card) && pileKey(card) !== openPile);
     if (card.id === flippedId) {
       // A card in hand is set at its reading size, not blown up to it: a
       // transform scale resamples what was already painted, so at ×4 the text
@@ -853,9 +869,9 @@ export function createView(field, { rig = false } = {}) {
   // whether the tap was spent here.
   function spreadPile(id) {
     const card = id == null ? null : lastState.cards.find((c) => c.id === id);
+    if (card && inSpread(card)) return false; // already open: the card is the target now
     const key = card ? pileKey(card) : null;
-    if (key && key === openPile) return false; // already open: the card is the target now
-    const group = key ? lastState.cards.filter((c) => pileKey(c) === key) : [];
+    const group = key ? lastState.cards.filter((c) => pileKey(c) === key || (!key.startsWith('~') && (c.makers ?? []).includes(key))) : [];
     const next = group.length > 1 ? key : null;
     if (next === openPile) return false;
     openPile = next;

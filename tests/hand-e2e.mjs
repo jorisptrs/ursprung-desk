@@ -184,13 +184,15 @@ try {
 
   ok(await evalIn(table, `${HELPERS} until(() => !!document.querySelector('[data-id="a-017"]'), 30000)`, true), 'opening pass runs to rest (meta lands)');
 
-  ok(await evalIn(table, `!document.querySelector('.add-btn')`), 'no + on the wood — the way in is space or enter, and the ? says so (D167)');
+  ok(await evalIn(table, `(() => { const b = document.querySelector('.add-btn'); if (!b) return false; const r = b.getBoundingClientRect(); return b.textContent === '+' && r.left < innerWidth / 2 && r.top > innerHeight / 2; })()`), 'a + waits in the pool\'s bottom-left (D91)');
   ok(await evalIn(table, `(() => {
     document.querySelector('.keys-btn').click();
     const rows = [...document.querySelectorAll('.keys__row')].map((r) => r.textContent);
     document.querySelector('.keys-btn').click();
-    return rows.some((t) => t.includes('space or enter') && t.includes('add your work'));
-  })()`), 'and the ? names the way in, in words');
+    // one row for adding a work, and it names the keys rather than repeating the + (D167)
+    return rows.filter((t) => t.includes('add your work')).length === 1
+      && rows.some((t) => t.includes('space or enter'));
+  })()`), 'the ? names the keys once, and does not repeat the + back at you');
   await press(table, 'Enter');
   ok(await evalIn(table, `${HELPERS} edReady()`, true), 'Enter is the +\'s key — the sheet opens, CodeMirror mounts (D98)');
   ok(await evalIn(table, `document.activeElement?.closest('.cm-editor') != null`), 'the pen is ready — the editor has focus');
@@ -244,7 +246,7 @@ try {
   }, 6000)`, true), 'push to table lays h-001 at once — no staging, and the sheet steps away (D99)');
 
   // -- /image: the slash menu, mid-text, no dashes, into the picker (D96/D97) --
-  await pressSpace(table); // the way in, now that the + is gone
+  await evalIn(table, `document.querySelector('.add-btn').click()`);
   ok(await evalIn(table, `${HELPERS} edReady()`, true), 'a second sheet mounts');
   await evalIn(table, `(() => { const p = document.querySelector('.sheet input[type=file][hidden]'); globalThis.__accept = null; p.click = () => { globalThis.__accept = p.accept; }; })()`);
   await evalIn(table, `__view.focus()`);
