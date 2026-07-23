@@ -146,17 +146,21 @@ One append-only stream of events is the whole truth: deposits and threads are bo
       "title": "kettle drone, take 4",
       "caption": "audio · B. + Claude",
       "people": ["B.", "Claude"],
-      "practice": "music",
       "provenance": "mcp | hand | curator",
       "visibility": "room | community | public",
       "excerpt": { "form": "crop | waveform | frames | sentence | lines | linework | render | words", "src": "assets/…", "text": "…" },
       "detail": { "composition": [], "assets": [], "links": [], "note": "" }
     } },
-  { "e": "thread", "night": 3, "from": "a-006", "to": "a-014", "why": "same makers" }
+  { "e": "thread", "night": 3, "from": "a-006", "to": "a-014", "why": "same makers" },
+  { "e": "arrange", "night": 3,
+    "places": { "B.": [0.31, 0.22], "M.": [0.55, 0.41], "Claude": [0.18, 0.79] },
+    "why": "B. and M. are both working on things that will not close." }
 ] }
 ```
 
-Distinctions that carry weight: `media` says how the trace is *drawn*; `kind` says how the card *behaves* (quests spawn faded, failures take the ashen register and Claude's corner, fieldnotes stack there too, the meta card closes the demo); `practice` says which craft the work belongs to — music, origami, manuscript — in the depositor's own word, one per artifact, no imposed taxonomy. `practice` renders nothing in v0 but cannot be reconstructed later, and it is the axis the honest record ("where Claude helped, by practice"), cross-practice threads, and the future castle-map all hang on. `excerpt` is the surface and always present in one of its forms; `detail` is the optional back — absent means the card does not open, and that absence is the entire privacy signal. Hand deposits fill `detail.composition`, the maker's ordered arrangement (text, stills, links, files) rendered on the back exactly as laid out; the flat fields (`assets`, `links`, `note`) stay legal beside it. There is no separate `asset` field: surface assets live in `excerpt`, full assets in `detail`. `provenance` names the door — who performed the gesture — never the medium; media already says what the thing is. The enum grows only if a door does, and new doors trigger the full consent machinery. `visibility` exists from day one because consent tiers cannot be retrofitted; the prototype sets everything to `public`.
+Distinctions that carry weight: `media` says how the trace is *drawn*; `kind` says how the card *behaves* (quests spawn faded, failures take the ashen register, fieldnotes are Claude's own, the meta card closes the demo); `people` says whose studio the card lies in, which is why every card names its makers and why nothing arrives anonymously. There is no `practice` field — a self-chosen craft label was one more thing to fill in and a worse signal than the log already carries; **affinity is derived from who worked with whom, and from a reading of the work itself** (D145). `excerpt` is the surface and always present in one of its forms; `detail` is the optional back — absent means the card does not open, and that absence is the entire privacy signal. Hand deposits fill `detail.composition`, the maker's ordered arrangement (text, stills, links, files) rendered on the back exactly as laid out; the flat fields (`assets`, `links`, `note`) stay legal beside it. There is no separate `asset` field: surface assets live in `excerpt`, full assets in `detail`. `provenance` names the door — who performed the gesture — never the medium; media already says what the thing is. The enum grows only if a door does, and new doors trigger the full consent machinery. `visibility` exists from day one because consent tiers cannot be retrofitted; the prototype sets everything to `public`.
+
+`arrange` says where each studio stands tonight. The table is a map of studios — one pile per person — and a pile's place is a fact in the log like everything else, so `fold` stays a pure function of the stream and never calls a reader. The judgment that produced it proposes **affinities with reasons, never coordinates**; a pure solver does the geometry. Arrangements accumulate: a night that moves three studios names three. No new arrangement — the uplink down, the reader silent — and the last one simply stands.
 
 Removal is retirement — an appended event the fold ceases to display; the stream itself is never rewritten.
 

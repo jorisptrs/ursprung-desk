@@ -233,7 +233,7 @@ test('a castle-scale table: the map holds where the scatter collapsed', () => {
   // studios rather than as a hundred separate things competing for the light
   const places = new Set(shown.map(group)).size;
   assert.ok(places < s.cards.length / 2, `a hundred works, ${places} places on the table`);
-  assert.ok(covered < 45, `covered caption strips stay far below the scatter's 209 (was ${covered})`);
+  assert.ok(covered < 25, `covered caption strips stay far below the scatter's 209 (was ${covered})`);
 
   // and every studio stands inside the light
   for (const st of s.studios) {

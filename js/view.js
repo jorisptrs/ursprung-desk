@@ -7,6 +7,7 @@
 // table.
 
 import { renderCard, backModel } from './cards.js';
+import { deckSpread } from './deposit.js';
 import { CARD_W, NOMINAL_H } from './fold.js';
 import { sleep } from './queue.js';
 import { isPlace } from './stream.js';
@@ -27,7 +28,7 @@ const READ_MIN = 200;
 const OPEN_H_FRAC = 0.86; // the tallest a card in hand may stand
 const PIECE_MAX_FRAC = 0.66; // of that: a still shares its leaf, never takes it whole (D102)
 
-const threadKey = (t) => `${t.from}→${t.to}`;
+const threadKey = (t) => `${t.from}→${t.to ?? (t.toPlace ?? []).join(',')}`;
 
 export function createView(field, { rig = false } = {}) {
   const cardEls = new Map(); // artifact id → element
@@ -39,6 +40,8 @@ export function createView(field, { rig = false } = {}) {
   let playing = null; // the one summoned experience: { cardId, el, doorEl } (D75)
   let openPage = 0; // which leaf of the open card's back is showing (D100)
   let openLeaves = [0]; // where each leaf begins, in the open back's own pixels
+  let openPile = null; // which studio's pile is spread open — view-ephemera too
+  let motionTimer = null;
 
   const layer = document.createElement('div');
   layer.className = 'threads';
@@ -51,6 +54,60 @@ export function createView(field, { rig = false } = {}) {
     return { w, h: w * (NOMINAL_H[card.artifact.media] ?? 0.9) };
   };
 
+  // ---- a pile spread open (D115's two-beat, borrowed from the editor's deck) ----
+
+  // Which pile a card lies in: a studio by name, or the shared place a set of
+  // hands keeps between them. The fold decided this; the view only reads it.
+  const pileKey = (card) => card.pile ?? (card.between ? `~${card.between}` : null);
+
+  const inOpenPile = () =>
+    openPile ? lastState.cards.filter((c) => pileKey(c) === openPile) : [];
+
+  // Where a card of the open pile lies, in px from where it lies stacked. The
+  // whole spread is nudged back inside the light, so a studio at the edge opens
+  // inward rather than off the table.
+  function spreadOf(card) {
+    if (!openPile || pileKey(card) !== openPile) return null;
+    const group = inOpenPile();
+    const i = group.findIndex((c) => c.id === card.id);
+    if (i < 0) return null;
+    const offsets = deckSpread(group.length);
+    const top = group[group.length - 1];
+    const { w, h } = cardSizePx(top);
+    const el = cardEls.get(top.id);
+    const pitch = { x: (el?.offsetWidth || w) * 1.1, y: (el?.offsetHeight || h) * 1.1 };
+    const cx = card.x * rect.w;
+    const cy = card.y * rect.h;
+    // the pile's own place, not this card's step in the cascade
+    const base = group[0];
+    const ox = base.x * rect.w + offsets[i][0] * pitch.x;
+    const oy = base.y * rect.h + offsets[i][1] * pitch.y;
+    const m = Math.max(8, short() * 0.015);
+    const span = offsets.reduce((s, [x, y]) => ({
+      x1: Math.min(s.x1, x), x2: Math.max(s.x2, x), y1: Math.min(s.y1, y), y2: Math.max(s.y2, y),
+    }), { x1: 0, x2: 0, y1: 0, y2: 0 });
+    const shift = (c, lo, hi, half, max) => {
+      const left = c + lo - half - m;
+      const right = c + hi + half + m;
+      if (right > max) return Math.min(0, max - right);
+      if (left < 0) return Math.max(0, -left);
+      return 0;
+    };
+    return {
+      dx: ox - cx + shift(base.x * rect.w, span.x1 * pitch.x, span.x2 * pitch.x, pitch.x / 2, rect.w),
+      dy: oy - cy + shift(base.y * rect.h, span.y1 * pitch.y, span.y2 * pitch.y, pitch.y / 2, rect.h),
+    };
+  }
+
+  // The one motion the table allows itself besides the flip, and only under a
+  // hand: while this flag stands, a card's move is a move (desk.css). Arrivals
+  // never carry it, so a card still appears where it will lie forever (D87).
+  function markMotion() {
+    field.dataset.opening = '';
+    clearTimeout(motionTimer);
+    motionTimer = setTimeout(() => { delete field.dataset.opening; }, 320);
+  }
+
   const cardBoxPx = (card) => {
     // prefer the real rendered box (content-driven heights, the D66 floor);
     // the model is the fallback before a card has ever laid down
@@ -58,8 +115,9 @@ export function createView(field, { rig = false } = {}) {
     const { w: mw, h: mh } = cardSizePx(card);
     const w = el?.offsetWidth || mw;
     const h = el?.offsetHeight || mh;
-    const cx = card.x * rect.w;
-    const cy = card.y * rect.h;
+    const spread = spreadOf(card);
+    const cx = card.x * rect.w + (spread?.dx ?? 0);
+    const cy = card.y * rect.h + (spread?.dy ?? 0);
     return { x1: cx - w / 2, y1: cy - h / 2, x2: cx + w / 2, y2: cy + h / 2, cx, cy };
   };
 
@@ -81,9 +139,9 @@ export function createView(field, { rig = false } = {}) {
       if (pivot) pivot.style.transform = 'rotateY(180deg)';
     } else {
       closeBack(el);
-      el.style.transform = `translate(-50%, -50%) rotate(${card.rot}deg)`;
+      el.style.transform = laidKeyframe(card);
       el.style.opacity = card.opacity;
-      el.style.zIndex = z;
+      el.style.zIndex = spreadOf(card) ? 300 + (card.depth ?? 0) : z;
       if (pivot) pivot.style.transform = '';
     }
   }
@@ -238,14 +296,18 @@ export function createView(field, { rig = false } = {}) {
   }
 
   // Thread geometry: center to center, trimmed to the two cards' rendered
-  // rects so the draw-on is visible end to end (nothing draws under paper).
+  // rects so the line is visible end to end (nothing draws under paper). An
+  // anchor runs from a shared work to a studio's place rather than to another
+  // card — that end is a point on the table, so nothing is trimmed off it.
   function threadGeom(thread, state) {
     const byId = new Map(state.cards.map((c) => [c.id, c]));
     const a = byId.get(thread.from);
-    const b = byId.get(thread.to);
-    if (!a || !b) return null;
+    if (!a) return null;
     const A = cardBoxPx(a);
-    const B = cardBoxPx(b);
+    const B = thread.toPlace
+      ? { cx: thread.toPlace[0] * rect.w, cy: thread.toPlace[1] * rect.h, x1: 0, y1: 0, x2: 0, y2: 0 }
+      : cardBoxPx(byId.get(thread.to) ?? {});
+    if (!thread.toPlace && !byId.get(thread.to)) return null;
     const dx = B.cx - A.cx;
     const dy = B.cy - A.cy;
     const span = Math.hypot(dx, dy);
@@ -253,7 +315,7 @@ export function createView(field, { rig = false } = {}) {
     const ux = dx / span;
     const uy = dy / span;
     const tA = rayExit(A.cx, A.cy, ux, uy, A); // leave the from-card
-    const tB = rayExit(B.cx, B.cy, -ux, -uy, B); // back off the to-card
+    const tB = thread.toPlace ? 0 : rayExit(B.cx, B.cy, -ux, -uy, B); // back off the to-card
     const len = span - tA - tB;
     if (len <= 2) return null; // cards touch — nothing to draw between them
     return {
@@ -267,8 +329,19 @@ export function createView(field, { rig = false } = {}) {
   const threadTransform = (g, scale = 1) =>
     `translate(${g.x.toFixed(1)}px, ${g.y.toFixed(1)}px) rotate(${g.angle.toFixed(4)}rad) scaleX(${(g.len * scale).toFixed(1)})`;
 
+  // What a thread claims, and when it says so (keeper's ruling 2026-07-23).
+  // An anchor holds a shared work between the studios that made it, and is
+  // always drawn: without it the card is an orphan in a gap. Every other
+  // thread is a claim about two works — a quest answered, a problem shared —
+  // and at castle scale drawing them all at once is a web. So they wait for
+  // their card to be picked up, which is the gesture that already means
+  // "tell me more about this one". The cartography comes back whole at replay
+  // and at the closing ceremony, where the map is the point.
+  const threadShows = (thread) =>
+    thread.anchor || (flippedId != null && (thread.from === flippedId || thread.to === flippedId));
+
   function settleThread(el, thread, state) {
-    const g = threadGeom(thread, state);
+    const g = threadShows(thread) ? threadGeom(thread, state) : null;
     el.style.display = g ? '' : 'none';
     if (g) el.style.transform = threadTransform(g);
     el.style.opacity = thread.opacity;
@@ -374,11 +447,15 @@ export function createView(field, { rig = false } = {}) {
     const gw = el.offsetWidth * grow;
     const gh = el.offsetHeight * grow;
     const m = Math.max(10, short() * 0.02);
+    const spread = spreadOf(card);
     const cx = card.x * rect.w;
     const cy = card.y * rect.h;
     const fit = (c, half, max) =>
       half * 2 + m * 2 >= max ? max / 2 : Math.min(Math.max(c, half + m), max - half - m);
-    return { dx: fit(cx, gw / 2, rect.w) - cx, dy: fit(cy, gh / 2, rect.h) - cy };
+    return {
+      dx: fit(cx + (spread?.dx ?? 0), gw / 2, rect.w) - cx,
+      dy: fit(cy + (spread?.dy ?? 0), gh / 2, rect.h) - cy,
+    };
   }
 
   function flippedTransform(card, el) {
@@ -388,8 +465,10 @@ export function createView(field, { rig = false } = {}) {
 
   // Keyframes need matching transform-function lists, or interpolation falls
   // into matrix decomposition. The turn itself lives on the pivot alone.
-  const laidKeyframe = (card) =>
-    `translate(calc(-50% + 0px), calc(-50% + 0px)) rotate(${card.rot}deg) scale(1)`;
+  const laidKeyframe = (card) => {
+    const s = spreadOf(card);
+    return `translate(calc(-50% + ${(s?.dx ?? 0).toFixed(1)}px), calc(-50% + ${(s?.dy ?? 0).toFixed(1)}px)) rotate(${card.rot}deg) scale(1)`;
+  };
 
   async function turnCard(id, open, token) {
     const card = lastState.cards.find((c) => c.id === id);
@@ -408,6 +487,7 @@ export function createView(field, { rig = false } = {}) {
     if (open) openPage = 0; // a card comes into the hand at its first leaf (D100)
     const z = lastState.cards.findIndex((c) => c.id === id) + 1;
     settleCard(el, card, z); // truth first; the turn is an overlay
+    relayThreads(); // and the card in hand is the one whose threads speak
     if (!open) el.style.zIndex = 400; // stay lifted while turning back down
     const toPose = open ? flippedTransform(card, el) : laidKeyframe(card);
     const anims = [
@@ -542,9 +622,31 @@ export function createView(field, { rig = false } = {}) {
     if (pace.wait) await Promise.race([sleep(pace.wait), token.aborted]);
   }
 
-  function onResize() {
-    rect = { w: field.clientWidth, h: field.clientHeight };
-    // cards are %/cqmin and re-flow by CSS; threads are px and re-laid here
+  // threads are px, so they are re-laid by hand: on resize, and whenever a card
+  // is picked up or put down, since that is what decides which of them show
+  // The first tap on a pile spreads it; the second takes a card in hand. A pile
+  // of one is not a pile — that tap goes straight through to the flip. Returns
+  // whether the tap was spent here.
+  function spreadPile(id) {
+    const card = id == null ? null : lastState.cards.find((c) => c.id === id);
+    const key = card ? pileKey(card) : null;
+    if (key && key === openPile) return false; // already open: the card is the target now
+    const group = key ? lastState.cards.filter((c) => pileKey(c) === key) : [];
+    const next = group.length > 1 ? key : null;
+    if (next === openPile) return false;
+    openPile = next;
+    if (flippedId != null) { // one thing in hand at a time: the card goes back down
+      if (playing?.cardId === flippedId) stopExperience();
+      flippedId = null;
+    }
+    markMotion();
+    reconcile(lastState);
+    return next != null;
+  }
+
+  const pileOpen = () => openPile != null;
+
+  function relayThreads() {
     const byKey = new Map(lastState.threads.map((t) => [threadKey(t), t]));
     for (const [key, el] of threadEls) {
       const t = byKey.get(key);
@@ -552,5 +654,10 @@ export function createView(field, { rig = false } = {}) {
     }
   }
 
-  return { renderInstant, playEvent, cancelActive, finishActive, onResize, flipJob, flipInstant, tapDoor, pageBack };
+  function onResize() {
+    rect = { w: field.clientWidth, h: field.clientHeight };
+    relayThreads(); // cards are %/cqmin and re-flow by CSS
+  }
+
+  return { renderInstant, playEvent, cancelActive, finishActive, onResize, flipJob, flipInstant, tapDoor, pageBack, spreadPile, pileOpen };
 }
