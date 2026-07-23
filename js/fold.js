@@ -1,11 +1,14 @@
 // The truth. fold(events, t) → table state. Pure and deterministic: no DOM,
 // no Date.now, no Math.random — same (events, t) in, the same table out, forever.
 // Coordinates are normalized 0–1 against the field (D38); the renderer maps to pixels.
-// Overlap is modeled in a canonical table (TABLE_ASPECT) — real desks overlap, so
-// relaxation enforces only one legibility floor: no card's title/caption strip is
-// ever covered by a newer card (D43). Placements are final (D87): a card lands
-// somewhere on the table and never moves again — position carries no meaning
-// beyond "someone put it there"; only Claude's corner pile is a place.
+// Overlap is modeled in a canonical table (TABLE_ASPECT). The table is a map of
+// studios: one pile per person, placed by the latest arrangement in the log, so
+// position carries meaning again — whose work this is, and whose problem it turns
+// out to share. Nothing moves while anyone is watching; a new arrangement is an
+// appended fact, and the table simply stands somewhere else the next time it is
+// drawn.
+
+import { humansOf, CLAUDE } from './affinity.js';
 
 export const SPACING = 1; // table-time units between consecutive events (D25)
 export const eventTime = (i) => (i + 1) * SPACING;
@@ -19,8 +22,6 @@ const SCALES = { image: 1.15, video: 1.15, fold: 1.05, note: 0.8 }; // §5: subt
 
 export const CARD_W = 0.24; // of the canonical short side, before scale — mirrors the renderer's sizing
 export const NOMINAL_H = { image: 1.05, video: 0.85, model: 0.9, fold: 1.0, audio: 0.65, text: 0.85, code: 0.85, note: 0.42 };
-const SAFE = 0.02; // absorbs the ±6° rotation the rect model ignores
-const RELAX_STEP = 0.02;
 
 export function fnv1a(str) {
   let h = 0x811c9dc5;
@@ -43,22 +44,6 @@ export function mulberry32(a) {
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const round4 = (v) => Math.round(v * 10000) / 10000;
 
-// Claude's studio corner (D67 amended): its work (field notes) and its
-// rejects (failures) pile there, like any studio holds drafts.
-function pilePlace(artifact) {
-  const rng = mulberry32(fnv1a(artifact.id));
-  return {
-    x: 0.155 + (rng() - 0.5) * 0.03,
-    y: 0.84 + (rng() - 0.5) * 0.03,
-    rot: round4((rng() - 0.5) * 7),
-    scale: SCALES[artifact.media] ?? 1,
-    baseOpacity: 1,
-  };
-}
-
-// Claude's corner pile neither drifts nor sweeps, and may cover its own.
-const stays = (card) => card.artifact.kind === 'fieldnotes' || card.artifact.kind === 'failure';
-
 // ---- overlap model (canonical units: table is TABLE_ASPECT × 1) ----
 
 export function cardRect(card) {
@@ -75,141 +60,85 @@ export function captionStrip(card) {
   return { x1: r.x1, y1: r.y2 - h * 0.32, x2: r.x2, y2: r.y2 };
 }
 
-const expand = (r, m) => ({ x1: r.x1 - m, y1: r.y1 - m, x2: r.x2 + m, y2: r.y2 + m });
-const intersects = (a, b) => a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
+// ---- the map of studios (keeper's ruling 2026-07-23) ----
+//
+// The table is one pile per person, because a scatter stops being legible at
+// about twenty-five cards and the cohort passes that on day one. It is also the
+// proposal's own model made literal: Claude attends with a studio in the chain,
+// and people wander in as they wander into each other's rooms.
+//
+// A card belongs to its HUMAN makers. Claude is never an anchor (§3): a card
+// credited "E. + Claude" is E.'s work with Claude in service, so it lies in E.'s
+// pile; only Claude's own work — its field notes, its failures — makes a pile of
+// Claude's own, one studio among the rest rather than a reserved corner (amends
+// D67). A work by two or more humans belongs to neither pile alone, so it floats
+// between them, and its threads to each maker stay drawn: they are what explains
+// where it is.
 
-// The pair geometry the settle checks: true shapes, a small safety margin on
-// the protected strip (placements are final — no drift discs, D87).
-const pairStrip = (c) => expand(captionStrip(c), SAFE);
+// Twenty-five studios and everything shared between them will not fit at
+// reading size — measured, not guessed: at 0.65 the table holds about 34 objects
+// and a full castle wants fifty. So a studio is drawn smaller than a card lies
+// elsewhere, and a shared work smaller still: it is a token saying "these two
+// made something", not a thing you read where it floats. Both open to full size
+// when touched, which is where reading was always going to happen.
+const PILE_SCALE = 0.55; // ~143px on a 1080p projection — above the D66 floor
+const FLOAT_SCALE = 0.4; // a mark between two studios, read by opening it
+const PILE_SHOWS = 4; // past the fourth, a pile is just a pile — never a tally of output
+const PILE_STEP_X = 0.006; // the cascade of one pile, in canonical units
+const PILE_STEP_Y = 0.008;
 
-// ---- the berth: each card lands in the largest empty space (D89) ----
+// A shared work is settled off the studios rather than dropped on the midpoint
+// between its makers — that midpoint is very often exactly where somebody else
+// is standing. Deterministic: a fixed number of steps, a hashed direction to
+// break ties, no randomness.
+const FLOAT_STEPS = 60;
+const FLOAT_CLEAR = 0.045; // canonical gap it tries to keep from anything else
 
-const GAP_PITCH = 0.05; // canonical lattice pitch (~390 candidates)
-const GAP_JITTER = 0.03; // per-card lattice offset ≥ pitch/2 — no grid survives
-const GAP_EDGE_W = 0.9; // a wall counts as 0.9 of a neighboring card
-const GAP_BAND_MIN = 0.03; // absolute slack floor on the tie-band
-const GAP_BAND_FRAC = 0.35; // relative slack — what varies the early, open table
-const CORNER_CANON = { x1: 0, y1: 0.66, x2: 0.34 * TABLE_ASPECT, y2: 1 }; // the pile's ground, as an obstacle
-
-// Signed Chebyshev separation between rects: > 0 gap, < 0 overlap depth —
-// negative values keep a total order once the table is crowded.
-const sep = (a, b) => Math.max(
-  Math.max(a.x1 - b.x2, b.x1 - a.x2),
-  Math.max(a.y1 - b.y2, b.y1 - a.y2),
-);
-
-// Bottleneck clearance of a rect against the laid cards, Claude's corner, and
-// the table's own bounds (walls at GAP_EDGE_W). Exported: the tests reuse it.
-export function clearance(rect, cards) {
-  let m = Infinity;
-  for (const c of cards) m = Math.min(m, sep(rect, cardRect(c)));
-  m = Math.min(m, sep(rect, CORNER_CANON));
-  const wall = Math.min(rect.x1, TABLE_ASPECT - rect.x2, rect.y1, 1 - rect.y2);
-  return Math.min(m, GAP_EDGE_W * wall);
+function settleFloats(floats, fixed) {
+  for (let step = 0; step < FLOAT_STEPS; step++) {
+    let moved = false;
+    for (const f of floats) {
+      let vx = 0;
+      let vy = 0;
+      const push = (ox, oy, need) => {
+        const dx = f.cx - ox;
+        const dy = f.cy - oy;
+        const d = Math.hypot(dx, dy);
+        if (d >= need) return;
+        if (d < 1e-6) { // exactly on top: part along a settled direction
+          const a = ((fnv1a(f.key) % 360) * Math.PI) / 180;
+          vx += Math.cos(a) * need;
+          vy += Math.sin(a) * need;
+          moved = true;
+          return;
+        }
+        vx += (dx / d) * (need - d) * 0.5;
+        vy += (dy / d) * (need - d) * 0.5;
+        moved = true;
+      };
+      for (const o of fixed) push(o.cx, o.cy, o.need + f.need);
+      for (const o of floats) if (o !== f) push(o.cx, o.cy, o.need + f.need);
+      // and it never strays far from the people who made it
+      const dx = f.homeX - f.cx;
+      const dy = f.homeY - f.cy;
+      vx += dx * 0.06;
+      vy += dy * 0.06;
+      f.cx = clamp(f.cx + vx, 0.05 * TABLE_ASPECT, TABLE_ASPECT - 0.05 * TABLE_ASPECT);
+      f.cy = clamp(f.cy + vy, 0.05, 0.95);
+    }
+    if (!moved) break;
+  }
 }
 
-// The largest empty space, deterministically: score a jittered lattice of
-// candidate rects, then pick from the near-best band — the relative band is
-// what keeps an open table varied instead of repeating one argmax. Fixed draw
-// order on one salted stream: jx, jy, pick, rot.
-function bestBerth(artifact, obstacles) {
-  const rng = mulberry32(fnv1a(artifact.id + ':gap'));
-  const jx = ((rng() * 2 - 1) * GAP_JITTER) / TABLE_ASPECT;
-  const jy = (rng() * 2 - 1) * GAP_JITTER;
-  const scale = SCALES[artifact.media] ?? 1;
-  const probe = { artifact, scale, x: 0, y: 0 };
-  const candidates = [];
-  let best = -Infinity;
-  const px = GAP_PITCH / TABLE_ASPECT;
-  for (let bx = 0.1; bx <= 0.9 + 1e-9; bx += px) {
-    for (let by = 0.13; by <= 0.87 + 1e-9; by += GAP_PITCH) {
-      const x = bx + jx;
-      const y = by + jy;
-      // jitter first, filter after — nothing ever leaks into the corner
-      if (x < 0.1 || x > 0.9 || y < 0.13 || y > 0.87) continue;
-      if (x < 0.34 && y > 0.66) continue;
-      probe.x = x;
-      probe.y = y;
-      const s = clearance(cardRect(probe), obstacles);
-      candidates.push({ x, y, s });
-      if (s > best) best = s;
-    }
-  }
-  const tol = Math.max(GAP_BAND_MIN, GAP_BAND_FRAC * best);
-  const band = candidates.filter((c) => c.s >= best - tol);
-  const pick = band[Math.floor(rng() * band.length)] ?? { x: 0.5, y: 0.5 };
-  return {
-    x: pick.x,
-    y: pick.y,
-    rot: round4((rng() - 0.5) * 12),
-    scale,
-    // quests stay faded — a register, not a place (eye-tuned 2026-07-22)
-    baseOpacity: artifact.kind === 'quest' ? 0.62 : 1,
-  };
-}
-
-// When gradient descent wedges in a local minimum, scan a deterministic spiral
-// for the nearest free berth — legibility is not negotiable (D43).
-function findClearBerth(cards, j) {
-  const a0 = ((fnv1a(cards[j].id + ':berth') % 360) * Math.PI) / 180;
-  const clear = (x, y) => {
-    const probe = { ...cards[j], x, y };
-    const rect = cardRect(probe);
-    for (let i = 0; i < j; i++) {
-      if (stays(cards[i]) && stays(cards[j])) continue;
-      if (intersects(rect, pairStrip(cards[i]))) return false;
-    }
-    return true;
-  };
-  for (let ring = 0; ring < 24; ring++) {
-    const r = 0.04 + ring * 0.035;
-    const steps = 10 + ring * 4;
-    for (let k = 0; k < steps; k++) {
-      const ang = a0 + (k / steps) * Math.PI * 2;
-      const x = clamp(cards[j].x + (Math.cos(ang) * r) / TABLE_ASPECT, 0.07, 0.93);
-      const y = clamp(cards[j].y + Math.sin(ang) * r, 0.09, 0.91);
-      if (clear(x, y)) {
-        cards[j].x = x;
-        cards[j].y = y;
-        return;
-      }
-    }
-  }
-  // no free berth at scan resolution — the floor test will say so
-}
-
-// The newcomer gives way to the laid table (D1/D43): gradient descent off
-// every violated strip at once, the spiral berth when descent wedges. One pass
-// suffices — the newcomer settles against cards that are already final.
-function settleOne(cards, j) {
-  const hashDir = (id) => {
-    const a = ((fnv1a(id) % 360) * Math.PI) / 180;
-    return [Math.cos(a), Math.sin(a)];
-  };
-  let guard = 0;
-  while (guard++ < 60) {
-    const rect = cardRect(cards[j]);
-    let vx = 0, vy = 0, hits = 0;
-    for (let i = 0; i < j; i++) {
-      if (stays(cards[i]) && stays(cards[j])) continue; // the pile may cover its own older notes
-      const strip = pairStrip(cards[i]);
-      if (!intersects(rect, strip)) continue;
-      hits++;
-      let dx = cards[j].x * TABLE_ASPECT - (strip.x1 + strip.x2) / 2;
-      let dy = cards[j].y - (strip.y1 + strip.y2) / 2;
-      const len = Math.hypot(dx, dy);
-      if (len < 1e-6) [dx, dy] = hashDir(cards[j].id);
-      else { dx /= len; dy /= len; }
-      vx += dx; vy += dy;
-    }
-    if (!hits) return;
-    const vlen = Math.hypot(vx, vy);
-    if (vlen < 1e-6) [vx, vy] = hashDir(cards[j].id); // opposed strips cancel: break the tie
-    else { vx /= vlen; vy /= vlen; }
-    cards[j].x = clamp(cards[j].x + (vx * RELAX_STEP) / TABLE_ASPECT, 0.07, 0.93);
-    cards[j].y = clamp(cards[j].y + vy * RELAX_STEP, 0.09, 0.91);
-  }
-  findClearBerth(cards, j); // descent exhausted with hits remaining
+// Where a person stands when no arrangement has named them yet.
+function fallbackPlace(name, index, total) {
+  const rng = mulberry32(fnv1a(`${name}:studio`));
+  const a = index * 2.399963229728653; // golden angle: a room, not a queue
+  const r = 0.42 * Math.sqrt((index + 0.5) / Math.max(1, total));
+  return [
+    clamp(0.5 + r * Math.cos(a) + (rng() - 0.5) * 0.04, 0.09, 0.91),
+    clamp(0.5 + r * Math.sin(a) + (rng() - 0.5) * 0.04, 0.09, 0.91),
+  ];
 }
 
 export function fold(events, t) {
@@ -218,15 +147,19 @@ export function fold(events, t) {
     if (eventTime(i) <= t) arrived.push({ ev: events[i], i });
   }
 
-  // One walk in stream order (D87/D89): each deposit lands in the largest
-  // empty space among the cards PRESENT AT THAT MOMENT and settles against
-  // them, then never moves — retires shrink the obstacle set only for cards
-  // that land later, so a retirement never re-places a survivor.
+  // One walk in stream order. Retires drop a card from the table; the pile it
+  // was in simply closes up behind it.
   const live = [];
-  let pileDepth = 0; // the corner pile cascades up-right; a retired slot stays a slot
   let maxNight = 0;
+  let places = null; // the latest arrangement at or before t
   for (const { ev, i } of arrived) {
-    if (ev.night > maxNight) maxNight = ev.night;
+    if (Number.isInteger(ev.night) && ev.night > maxNight) maxNight = ev.night;
+    if (ev.e === 'arrange') {
+      // arrangements accumulate: a night that moves three studios says only
+      // those three, and everyone else keeps the place they already had
+      places = { ...places, ...ev.places };
+      continue;
+    }
     if (ev.e === 'retire') {
       const at = live.findIndex((c) => c.id === ev.id);
       if (at >= 0) live.splice(at, 1);
@@ -234,27 +167,89 @@ export function fold(events, t) {
     }
     if (ev.e !== 'deposit') continue;
     const a = ev.artifact;
-    let g;
-    if (a.kind === 'fieldnotes' || a.kind === 'failure') {
-      g = pilePlace(a);
-      g.x += pileDepth * 0.03;
-      g.y -= pileDepth * 0.024;
-      pileDepth += 1;
-    } else {
-      g = bestBerth(a, live);
-    }
+    const makers = humansOf(a);
     live.push({
       id: a.id,
       artifact: a,
-      x: g.x,
-      y: g.y,
-      rot: g.rot,
-      scale: g.scale,
-      baseOpacity: g.baseOpacity,
+      makers,
+      pile: makers.length === 1 ? makers[0] : makers.length ? null : CLAUDE,
       night: ev.night,
       arrivedAt: eventTime(i),
     });
-    settleOne(live, live.length - 1);
+  }
+
+  // Whose studios stand tonight, in the order the log first named them — so a
+  // table with no arrangement yet is still a room. Everyone named on any card
+  // gets one, not only those who deposited alone: someone whose whole week is
+  // collaborations still has a studio, and a floating work needs both its ends
+  // to have somewhere to hang from.
+  const studios = [];
+  for (const c of live) {
+    for (const name of c.makers) if (!studios.includes(name)) studios.push(name);
+    if (!c.makers.length && !studios.includes(CLAUDE)) studios.push(CLAUDE);
+  }
+  const at = new Map();
+  studios.forEach((name, i) => {
+    const said = places?.[name];
+    at.set(name, Array.isArray(said) && said.length === 2 && said.every(Number.isFinite)
+      ? [clamp(said[0], 0.06, 0.94), clamp(said[1], 0.06, 0.94)]
+      : fallbackPlace(name, i, studios.length));
+  });
+
+  // Each pile cascades up-right, newest on top; past the fourth the cards stop
+  // stepping, so depth is a placement rule and a pile never reads as a score.
+  // Everything the same hands made together is one floating pile, for the same
+  // reason: two people who keep working together make one place between them,
+  // not a drift of separate cards.
+  const depth = new Map();
+  const floats = new Map(); // maker-set → the shared works of those hands
+  for (const c of live) {
+    const rng = mulberry32(fnv1a(c.id));
+    c.rot = round4((rng() - 0.5) * 7);
+    c.baseOpacity = c.artifact.kind === 'quest' ? 0.62 : 1;
+
+    if (c.pile) {
+      c.scale = (SCALES[c.artifact.media] ?? 1) * PILE_SCALE;
+      const d = depth.get(c.pile) ?? 0;
+      depth.set(c.pile, d + 1);
+      c.depth = d;
+      const shown = Math.min(d, PILE_SHOWS - 1);
+      const [px, py] = at.get(c.pile);
+      c.x = clamp(px + shown * PILE_STEP_X, 0.05, 0.95);
+      c.y = clamp(py - shown * PILE_STEP_Y, 0.05, 0.95);
+      c.buried = d >= PILE_SHOWS;
+      continue;
+    }
+    c.scale = (SCALES[c.artifact.media] ?? 1) * FLOAT_SCALE;
+    const key = [...c.makers].sort().join('+');
+    c.between = key;
+    if (!floats.has(key)) floats.set(key, []);
+    floats.get(key).push(c);
+  }
+
+  // Where each shared pile settles: it starts between the hands that made it,
+  // then is pushed clear of the studios and of the other shared piles.
+  const half = (s) => (CARD_W * s * 0.5 + FLOAT_CLEAR);
+  const fixed = studios.map((name) => {
+    const [x, y] = at.get(name);
+    return { cx: x * TABLE_ASPECT, cy: y, need: half(PILE_SCALE * 1.15) };
+  });
+  const nodes = [...floats.entries()].map(([key, group]) => {
+    const anchors = group[0].makers.filter((m) => at.has(m));
+    const hx = anchors.length ? anchors.reduce((s, m) => s + at.get(m)[0], 0) / anchors.length : 0.5;
+    const hy = anchors.length ? anchors.reduce((s, m) => s + at.get(m)[1], 0) / anchors.length : 0.5;
+    return { key, group, homeX: hx * TABLE_ASPECT, homeY: hy, cx: hx * TABLE_ASPECT, cy: hy, need: half(FLOAT_SCALE * 1.15) };
+  }).sort((a, b) => a.key.localeCompare(b.key)); // a settled order, so the settle is settled
+  settleFloats(nodes, fixed);
+
+  for (const n of nodes) {
+    n.group.forEach((c, d) => {
+      c.depth = d;
+      const shown = Math.min(d, PILE_SHOWS - 1);
+      c.x = clamp(n.cx / TABLE_ASPECT + shown * PILE_STEP_X, 0.05, 0.95);
+      c.y = clamp(n.cy - shown * PILE_STEP_Y, 0.05, 0.95);
+      c.buried = d >= PILE_SHOWS;
+    });
   }
 
   const cards = live;
@@ -268,6 +263,18 @@ export function fold(events, t) {
   }
 
   const byId = new Map(cards.map((c) => [c.id, c]));
+  // A floating work is held by its makers' studios, and those threads are drawn
+  // at rest: without them the card is an orphan in a gap. Every other thread
+  // waits for its card to be picked up.
+  const anchorThreads = [];
+  for (const n of nodes) {
+    const top = n.group[0];
+    for (const m of top.makers) {
+      if (!at.has(m)) continue;
+      const [x, y] = at.get(m);
+      anchorThreads.push({ from: top.id, toPlace: [round4(x), round4(y)], anchor: true, opacity: top.opacity });
+    }
+  }
   const threads = arrived
     .filter((x) => x.ev.e === 'thread' && byId.has(x.ev.from) && byId.has(x.ev.to))
     .map((x) => ({
@@ -275,9 +282,11 @@ export function fold(events, t) {
       to: x.ev.to,
       why: x.ev.why ?? null,
       night: x.ev.night,
+      anchor: false,
       // D14 concretized: a thread fades with its dimmer end.
       opacity: round4(Math.min(byId.get(x.ev.from).opacity, byId.get(x.ev.to).opacity)),
     }));
 
-  return { t, maxNight, cards, threads };
+  const studioList = studios.map((name) => ({ name, place: at.get(name).map(round4), held: depth.get(name) ?? 0 }));
+  return { t, maxNight, cards, studios: studioList, threads: [...anchorThreads, ...threads] };
 }

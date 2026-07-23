@@ -91,8 +91,8 @@ export function createStream() {
     // Where each studio stands tonight. The arrangement is judged elsewhere —
     // by whoever or whatever read the work — and enters here as an ordinary
     // appended fact, so `fold` stays a pure function of the log and replay can
-    // still walk the four days. A person the arrangement does not mention keeps
-    // whatever place the table already gave them.
+    // still walk the four days. Arrangements accumulate: a night that moves three
+    // studios names only those three, and everyone else keeps the place they had.
     if (event.e === 'arrange') {
       const places = event.places;
       if (!places || typeof places !== 'object' || Array.isArray(places)) reject('an arrangement is a set of places');
