@@ -226,7 +226,8 @@ try {
   await press(table, 'Backspace');
   await press(table, 'Backspace');
   ok(await evalIn(table, `${HELPERS} until(() => document.querySelector('.sheet__face .card--note .trace--words')?.textContent === 'kiln note, day two', 3000)`, true), "the '# ' line becomes the title on the front");
-  ok((await evalIn(table, `document.querySelector('.sheet__face .card__caption')?.textContent`)) === 'T. + Claude', 'the author reads from the @-mentions');
+  ok((await evalIn(table, `document.querySelector('.sheet__face .card__by')?.textContent`)) === '@T. + Claude',
+    'the author reads from the @-mentions, on its own line (D148/D160)');
   ok(await evalIn(table, `document.querySelector('.cm-line.desk-title')?.textContent === 'kiln note, day two'`), "the '# ' marks hide once the pen has left the title line (D98)");
   ok(await evalIn(table, `document.querySelectorAll('.desk-mention').length >= 2`), 'the names wear their quiet pills (D98)');
   await evalIn(table, `${HELPERS} act('push to table')`);

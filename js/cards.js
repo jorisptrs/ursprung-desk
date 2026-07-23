@@ -330,9 +330,23 @@ export function renderCard(artifact, opts = {}) {
     front.append(stamp);
   }
 
+  // One text on the face (keeper's ruling): a title if the card has one, else
+  // the work's own words, else the caption of the piece that fronts it. Three
+  // stacked text blocks per card was most of the noise on a full table, and two
+  // of the three were nearly always saying the same thing twice.
+  const WORDS = ['note', 'text', 'code'];
+  const shown = [artifact.title, artifact.excerpt?.text, artifact.caption]
+    .map((v) => (typeof v === 'string' ? v.trim() : ''))
+    .find(Boolean) ?? '';
+
   const trace = document.createElement('div');
   trace.className = 'card__trace';
-  trace.append((TRACES[artifact.media] ?? img)(artifact));
+  // for a card whose surface IS words, the one text is the surface — it keeps
+  // the excerpt's own typography rather than being demoted to a label
+  const surface = WORDS.includes(artifact.media)
+    ? { ...artifact, excerpt: { ...artifact.excerpt, text: shown } }
+    : artifact;
+  trace.append((TRACES[artifact.media] ?? img)(surface));
   // A take says it is a take (D119): the strip alone reads as three photographs.
   // A mark, not a control — the gesture is still the turn, and the door on the
   // back is what summons it (D72/D75).
@@ -343,26 +357,11 @@ export function renderCard(artifact, opts = {}) {
   }
   front.append(trace);
 
-  // Words shown whole never repeat as a title (D40, generalized): a note whose
-  // words are the title, or a text/code excerpt identical to it, carries the
-  // line once — a quest is its own title, a lone sentence its own card.
-  const titleText = (artifact.title ?? '').trim(); // a card may carry no title at all (D116)
-  const wordsAreTitle =
-    (artifact.media === 'note' && (artifact.excerpt.text ?? artifact.title ?? '').trim() === titleText)
-    || ((artifact.media === 'text' || artifact.media === 'code')
-      && (artifact.excerpt.text ?? '').trim() === titleText);
-  if (titleText && !wordsAreTitle) {
-    const title = document.createElement('div');
-    title.className = 'card__title';
-    title.textContent = artifact.title;
-    front.append(title);
-  }
-
-  if (artifact.caption) {
-    const caption = document.createElement('div');
-    caption.className = 'card__caption';
-    caption.textContent = artifact.caption;
-    front.append(caption);
+  if (shown && !WORDS.includes(artifact.media)) {
+    const label = document.createElement('div');
+    label.className = 'card__title';
+    label.textContent = shown;
+    front.append(label);
   }
 
   // Whose card this is, in the room's own grammar (D137): the makers as they

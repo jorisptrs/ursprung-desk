@@ -210,18 +210,31 @@ export function arrange(people, pairs = [], previous = {}, { steps = STEPS, drif
   return places;
 }
 
-// A pile opened under a hand (D144): every card shown whole, a thin margin
-// between them, and no more room taken than that needs — a pile of two opens to
-// two cards wide, not to the deck's fixed square. Cards in one studio are not
-// one size (a photograph is taller than a note), so rows are shelf-packed: each
-// row is as tall as its tallest card, and the block is centred on the studio.
-// Sizes in, offsets from the block's centre out. Pure — no DOM, no clock.
-export function packSpread(sizes, gap = 8) {
+// A pile opened under a hand (D144/D161): every card shown whole, a thin margin
+// between them, and no more room taken than that needs. The order is the order
+// they were made, reading left to right and top to bottom, so opening a studio
+// is following how the work went rather than reading a heap. Rows are filled to
+// `width` and then wrapped, and each row is as tall as its tallest card, since a
+// photograph and a note are not one size. Sizes in, offsets from the block's
+// centre out. Pure — no DOM, no clock.
+export function packSpread(sizes, gap = 8, width = Infinity) {
   const list = (sizes ?? []).filter((s) => s && s.w > 0 && s.h > 0);
   if (!list.length) return { offsets: [], w: 0, h: 0 };
-  const cols = Math.ceil(Math.sqrt(list.length));
-  const rows = [];
-  for (let i = 0; i < list.length; i += cols) rows.push(list.slice(i, i + cols));
+
+  const rows = [[]];
+  let run = 0;
+  for (const c of list) {
+    const row = rows[rows.length - 1];
+    const need = row.length ? run + gap + c.w : c.w;
+    if (row.length && need > width) {
+      rows.push([c]);
+      run = c.w;
+      continue;
+    }
+    row.push(c);
+    run = need;
+  }
+
   const rowW = rows.map((r) => r.reduce((s, c) => s + c.w, 0) + gap * (r.length - 1));
   const rowH = rows.map((r) => Math.max(...r.map((c) => c.h)));
   const h = rowH.reduce((a, b) => a + b, 0) + gap * (rows.length - 1);

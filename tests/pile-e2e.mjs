@@ -184,6 +184,26 @@ async function main() {
   ok(!(sound?.links ?? []).some((h) => /\.(m4a|mp3|wav|mp4|mov|webm)$/i.test(h ?? '')),
     'and no line beside it that would fetch the same file instead');
 
+  // put it back down while the pile is still open: it belongs above the table
+  // with the rest of its pile, not under whatever studio lies beside it
+  await click(pick.x + pick.w / 2, pick.y + pick.h / 2);
+  await sleep(900);
+  await shot('3-laid-again');
+  const again = (await geom()).find((c) => c.id === pick.id);
+  ok(again.z >= 300, `laid back down it stays above the table (z ${again.z})`);
+  ok(Math.abs(again.w - pick.w) < 2, 'and at the size it lay at');
+  const covers = (await geom()).filter((c) => c.id !== pick.id && c.z > again.z
+    && c.x < again.x + again.w && c.x + c.w > again.x && c.y < again.y + again.h && c.y + c.h > again.y);
+  ok(!covers.length, `and nothing lies over it (${covers.map((c) => c.id).join(', ')})`);
+  // and it can be picked up again
+  await click(again.x + again.w / 2, again.y + again.h / 2);
+  await sleep(900);
+  const twice = (await geom()).find((c) => c.id === pick.id);
+  ok(twice.w > pick.w * 1.4, 'a second turn reads it again');
+  await click(twice.x + twice.w / 2, twice.y + twice.h / 2);
+  await sleep(900);
+  ok((await geom()).find((c) => c.id === pick.id).z >= 300, 'and it comes back to the pile again');
+
   // and the wood puts everything back — a point inside the light with nothing on it
   const wood = await evalIn(`(() => {
     const f = document.getElementById('field');

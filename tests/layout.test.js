@@ -116,28 +116,49 @@ const overlaps = (rs) => {
 };
 
 test('an open pile shows every card whole, and no card covers another', () => {
-  for (const n of [1, 2, 3, 4, 5, 6, 9, 12]) {
+  for (const n of [1, 2, 3, 4, 5, 6, 9, 12, 30]) {
     const sizes = boxes(n);
-    const pack = packSpread(sizes, 8);
+    const pack = packSpread(sizes, 8, 500);
     assert.equal(pack.offsets.length, n, `${n} cards, ${n} places`);
     assert.ok(!overlaps(rects(sizes, pack)), `${n} cards overlap`);
   }
+});
+
+test('a studio opens as a sequence: oldest first, along the row and down (D161)', () => {
+  const sizes = boxes(7, 100, 90);
+  const pack = packSpread(sizes, 8, 340); // three to a row
+  const rows = [];
+  pack.offsets.forEach((o, i) => {
+    const row = rows.find((r) => Math.abs(r.y - o.dy) < 1e-9) ?? (rows.push({ y: o.dy, at: [] }), rows[rows.length - 1]);
+    row.at.push({ i, dx: o.dx });
+  });
+  assert.equal(rows.length, 3, 'seven cards, three to a row');
+  assert.deepEqual(rows.map((r) => r.at.length), [3, 3, 1]);
+  for (const row of rows) {
+    const order = [...row.at].sort((a, b) => a.dx - b.dx).map((c) => c.i);
+    assert.deepEqual(order, row.at.map((c) => c.i), 'a row reads left to right, in the order they were made');
+  }
+  // and the rows themselves go downward in the same order
+  assert.ok(rows[0].y < rows[1].y && rows[1].y < rows[2].y, 'the newest work is the furthest down');
+  assert.ok(rows[0].at[0].i === 0 && rows[2].at[0].i === 6, 'oldest at the start, newest at the end');
 });
 
 test('it takes only the room it needs — a pile of one grows nothing', () => {
   const one = packSpread(boxes(1), 8);
   assert.deepEqual(one.offsets, [{ dx: 0, dy: 0 }]);
   assert.deepEqual([one.w, one.h], [100, 90], 'a card alone is its own block');
-  const two = packSpread(boxes(2), 8);
+  const two = packSpread(boxes(2), 8, 500);
   assert.equal(two.w, 208, 'two cards wide, plus the margin — not a fixed square');
   assert.equal(two.h, 90, 'and one card tall');
-  assert.ok(packSpread(boxes(9), 8).w < packSpread(boxes(12), 8).w * 1.01);
+  // and a pile too wide for the light wraps rather than running off it
+  assert.ok(packSpread(boxes(9), 8, 340).w <= 340);
+  assert.equal(packSpread(boxes(9), 8, 340).h, 90 * 3 + 8 * 2);
 });
 
 test('the block is centred, so it opens around the studio it belongs to', () => {
   for (const n of [2, 3, 5, 7]) {
     const sizes = boxes(n);
-    const rs = rects(sizes, packSpread(sizes, 8));
+    const rs = rects(sizes, packSpread(sizes, 8, 340));
     const left = Math.min(...rs.map((r) => r.x1));
     const right = Math.max(...rs.map((r) => r.x2));
     const top = Math.min(...rs.map((r) => r.y1));
@@ -149,7 +170,7 @@ test('the block is centred, so it opens around the studio it belongs to', () => 
 
 test('a studio holds more than one shape: rows are as tall as their tallest card', () => {
   const sizes = [{ w: 100, h: 200 }, { w: 100, h: 60 }, { w: 100, h: 90 }, { w: 100, h: 90 }];
-  const pack = packSpread(sizes, 8);
+  const pack = packSpread(sizes, 8, 230); // two to a row
   assert.ok(!overlaps(rects(sizes, pack)), 'a tall photograph does not sit on the note beside it');
   assert.equal(pack.h, 200 + 8 + 90, 'the block is the sum of its rows, not of its cards');
 });

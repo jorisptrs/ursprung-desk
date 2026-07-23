@@ -425,11 +425,27 @@ export function resolveFront({ title = '', blocks = [], frontPieceId = null, fro
   return { piece, textBlock }; // textBlock null → the title (if any) is the front's text
 }
 
+// A line that is nothing but names is a signature, not prose — and it lives in
+// the same text block as the writing above it, one blank line down (D137). Since
+// a card now carries its makers on its own line (D148), leaving it in wrote the
+// same names twice on one face, three times where the author caption still
+// stood. The names are read out of it first; the line itself goes.
+const isSignatureLine = (line) => line.trim() !== '' && !line.replace(/@[^\s@]+/g, '').trim();
+export const withoutSignature = (text) => String(text ?? '')
+  .split('\n')
+  .filter((line) => !isSignatureLine(line))
+  .join('\n')
+  .trim();
+
 export function composeArtifact({ kind = 'work', blocks: rawBlocks = [], frontPieceId = null, frontTextId = null, roster = [] }) {
-  const { title, blocks } = extractTitle(rawBlocks);
+  const { title, blocks: written } = extractTitle(rawBlocks);
+  const blocks = written
+    .map((b) => (b.t === 'text' ? { ...b, text: withoutSignature(b.text) } : b))
+    .filter((b) => b.t !== 'text' || b.text);
   const { piece, textBlock } = resolveFront({ title, blocks, frontPieceId, frontTextId });
   const frontText = textBlock ? textBlock.text.trim() : title.trim();
-  const people = parseMentions(blocks.filter((b) => b.t === 'text').map((b) => b.text), roster);
+  // the signature is read for its names before it is dropped
+  const people = parseMentions(written.filter((b) => b.t === 'text').map((b) => b.text), roster);
 
   const artifact = {
     kind,
@@ -450,10 +466,9 @@ export function composeArtifact({ kind = 'work', blocks: rawBlocks = [], frontPi
     artifact.excerpt = { form: 'words' };
     artifact.title = '';
   }
-  if (people.length) {
-    artifact.people = people;
-    artifact.caption = people.join(' + '); // the author is always on the front (D88)
-  }
+  // The makers travel in `people` and the face writes them itself (D148); the
+  // caption used to repeat them, which is the same names said twice.
+  if (people.length) artifact.people = people;
 
   // The back is the arrangement itself. Blob slots are keyed by composition
   // index; the first audio/video holds the play door, else the first link the
@@ -976,12 +991,18 @@ export function openSheet({
     state.unknownRefs = unknownRefs;
     if (unknownRefs.length) say(`a reference points at nothing · ${unknownRefs.join(', ')}`);
     else if (status.textContent.startsWith('a reference points')) say('');
-    if (!artifact.media) {
+    // A page that is only its signature is not yet a card (the stream refuses
+    // one), but it is already SOMEBODY'S — and showing that is how the sheet
+    // teaches the '@' at all (D137). So a signed blank previews as a blank card
+    // with a name on it; a page with nothing at all previews as nothing.
+    const signedOnly = !artifact.media && artifact.people?.length;
+    if (!artifact.media && !signedOnly) {
       face(null, 'front of the card', ''); // the empty plate says it itself — no instruction on the sheet
       return;
     }
     const urlFor = (b) => { const u = URL.createObjectURL(b); state.previewUrls.push(u); return u; };
-    const front = renderCard({ ...materialize(artifact, blobs, urlFor), id: 'h-preview' });
+    const shownAs = signedOnly ? { ...artifact, media: 'note' } : artifact;
+    const front = renderCard({ ...materialize(shownAs, blobs, urlFor), id: 'h-preview' });
     front.classList.add('sheet__card');
     face(front, front.classList.contains('card--backed') ? 'front of the card · the page above is its back' : 'front of the card · it stays closed', '');
   }
