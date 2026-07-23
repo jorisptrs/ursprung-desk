@@ -88,6 +88,26 @@ export function createStream() {
       return;
     }
 
+    // Where each studio stands tonight. The arrangement is judged elsewhere —
+    // by whoever or whatever read the work — and enters here as an ordinary
+    // appended fact, so `fold` stays a pure function of the log and replay can
+    // still walk the four days. A person the arrangement does not mention keeps
+    // whatever place the table already gave them.
+    if (event.e === 'arrange') {
+      const places = event.places;
+      if (!places || typeof places !== 'object' || Array.isArray(places)) reject('an arrangement is a set of places');
+      const names = Object.keys(places);
+      if (!names.length) reject('an arrangement with nobody in it places nothing');
+      for (const name of names) {
+        if (!isFilled(name)) reject('a place belongs to a name');
+        const at = places[name];
+        if (!Array.isArray(at) || at.length !== 2) reject(`${name}'s place is an x and a y`);
+        if (!at.every((n) => Number.isFinite(n) && n >= 0 && n <= 1)) reject(`${name}'s place lies off the table`);
+      }
+      if (event.why !== undefined && !isFilled(event.why)) reject('why, if present, must say something');
+      return;
+    }
+
     reject(`unknown event type "${event.e}"`);
   }
 

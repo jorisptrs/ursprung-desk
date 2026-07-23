@@ -143,3 +143,24 @@ test('a back is an object — an array is not one (D128)', () => {
   assert.throws(() => s.append({ e: 'deposit', night: 0, artifact: artifact({ detail: null }) }), /detail must be an object/);
   assert.doesNotThrow(() => s.append({ e: 'deposit', night: 0, artifact: artifact({ detail: { note: 'a line' } }) }));
 });
+
+test('an arrangement is a set of places, and every place lies on the table', () => {
+  const s = createStream();
+  const arrange = (over = {}) => ({ e: 'arrange', night: 2, places: { 'E.': [0.3, 0.4] }, ...over });
+
+  s.append(arrange());
+  s.append(arrange({ places: { 'E.': [0, 0], 'M.': [1, 1], Claude: [0.5, 0.5] }, why: 'the fold and the drone are one problem' }));
+  assert.equal(s.all().length, 2, 'the edges of the light are still on it');
+
+  assert.throws(() => s.append(arrange({ places: undefined })), /a set of places/);
+  assert.throws(() => s.append(arrange({ places: [] })), /a set of places/);
+  assert.throws(() => s.append(arrange({ places: {} })), /nobody in it/);
+  assert.throws(() => s.append(arrange({ places: { ' ': [0.1, 0.1] } })), /belongs to a name/);
+  assert.throws(() => s.append(arrange({ places: { 'E.': [0.1] } })), /an x and a y/);
+  assert.throws(() => s.append(arrange({ places: { 'E.': 0.1 } })), /an x and a y/);
+  assert.throws(() => s.append(arrange({ places: { 'E.': [1.4, 0.2] } })), /off the table/);
+  assert.throws(() => s.append(arrange({ places: { 'E.': [-0.1, 0.2] } })), /off the table/);
+  assert.throws(() => s.append(arrange({ places: { 'E.': ['a', 'b'] } })), /off the table/);
+  assert.throws(() => s.append(arrange({ why: '   ' })), /must say something/);
+  assert.throws(() => s.append({ e: 'arrange', places: { 'E.': [0.1, 0.1] } }), /night must be/);
+});
