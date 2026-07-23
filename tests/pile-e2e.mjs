@@ -121,6 +121,9 @@ async function main() {
   }
   // and one that holds something worth reading, so the second beat has a target
   const backed = await evalIn(`[...document.querySelectorAll('.card--backed')].map((el) => el.dataset.id)`);
+  // a studio that has both its own work and a work made with somebody else, so
+  // opening it can be shown to gather the whole thread of thinking (D173)
+
   const bigFirst = stacks.sort((a, b) => b.length - a.length);
   const deep = bigFirst.find((g) => g.length >= 3 && g.some((c) => backed.includes(c.id))) ?? bigFirst[0];
   ok(deep.length >= 3, `the deepest pile holds ${deep.length}`);
@@ -128,6 +131,18 @@ async function main() {
 
   await click(top.x + top.w / 2, top.y + top.h / 2);
   await shot('1-open');
+  // Whatever was opened, everything in it was made by the same hands: a
+  // studio gathers that person's collaborations into their own timeline (D173),
+  // and a shared place holds only what those hands made together.
+  const gathered = await evalIn(`(() => {
+    const lit = [...document.querySelectorAll('.card[data-lit]')];
+    const names = lit.map((el) => (el.querySelector('.card__by')?.textContent || '')
+      .split(' ').filter((w) => w.startsWith('@')));
+    const common = names.length ? names[0].filter((n) => names.every((s) => s.includes(n))) : [];
+    return { total: lit.length, visiting: lit.filter((el) => el.hasAttribute('data-shared')).length, common };
+  })()`);
+  ok(gathered.common.length > 0, `everything opened was made by the same hands (${gathered.common.join(' ')})`);
+  ok(gathered.visiting <= gathered.total, `${gathered.visiting} of ${gathered.total} are works made with somebody else`);
   const opened = await geom();
   // the pile is whatever the fold says it is, not whatever lay near it
   const lit = await evalIn(`[...document.querySelectorAll('.card[data-lit]')].map((el) => el.dataset.id)`);
