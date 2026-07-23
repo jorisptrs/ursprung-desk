@@ -70,17 +70,27 @@ test('arrival gating at boundary t values', () => {
   assert.equal(settled.threads.filter((t) => !t.anchor).length, threads.length);
 });
 
-test('strata are pure outputs of the stream, and reach no card’s light', () => {
+test('which night it is, and no card the dimmer for it', () => {
   const events = loadSeed();
   const state = fold(events, pastEnd(events));
   const deposits = seed.events.filter((ev) => ev.e === 'deposit');
-  const quest = state.cards.find((c) => c.artifact.kind === 'quest');
   const newest = state.cards.find((c) => c.id === deposits[deposits.length - 1].artifact.id);
-  assert.equal(state.maxNight, 4);
-  assert.equal(quest.stratum, 4, 'how deep a card lies is still a fact of the log');
-  assert.equal(newest.stratum, 0);
-  // D14 retired: nothing on this table is translucent, whatever night it is from
+  assert.equal(state.maxNight, 4, 'the log’s own headline fact');
+  assert.equal(newest.night, 4, 'and every card still says which night it is from');
+  // D14 retired: nothing on this table is translucent, whatever night it is from,
+  // and `stratum` went with the dimmer it fed
   assert.ok(state.cards.every((c) => c.opacity === 1), 'every card lies at full strength');
+  assert.ok(state.cards.every((c) => c.stratum === undefined), 'nothing computes a depth nobody reads');
+});
+
+test('a night is said, and the table hears it (D175)', () => {
+  const evs = [person('a-1', ['E.'], 'work', 1), { e: 'night', night: 2 }, person('a-2', ['E.'], 'work', 2)];
+  const s = fold(evs, pastEnd(evs));
+  assert.equal(s.maxNight, 2, 'the night moved without a card to move it');
+  assert.equal(s.cards.length, 2, 'and the night itself is a fact, not a card');
+  // it lands mid-stream like anything else, so replay walks it
+  assert.equal(fold(evs, eventTime(0)).maxNight, 1);
+  assert.equal(fold(evs, eventTime(1)).maxNight, 2);
 });
 
 test('a thread is as strong as its ends, and its ends no longer fade (D14 retired)', () => {

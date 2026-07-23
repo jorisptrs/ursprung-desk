@@ -30,6 +30,7 @@ export function createStream() {
   const events = [];
   const artifacts = new Map();
   const listeners = [];
+  let highestNight = 0;
 
   function validate(event) {
     if (!event || typeof event !== 'object') reject('event must be an object');
@@ -88,6 +89,20 @@ export function createStream() {
       return;
     }
 
+    // Which night it is. Everything else the desk works out for itself — an id
+    // from the log, a place from the arrangement — but no amount of reading the
+    // log tells you that yesterday ended, so somebody says so and the log
+    // records it like any other fact. It may only ever move forward: a night
+    // that went backwards would re-date every card laid after it.
+    if (event.e === 'night') {
+      if (event.night <= highestNight) {
+        reject(highestNight === 0 && event.night === 0
+          ? 'night 0 is where the log starts — the first night to begin is night 1'
+          : `it is already night ${highestNight}`);
+      }
+      return;
+    }
+
     // The cohort. The curator registers people before anyone deposits anything,
     // and the table opens as a room of named empty places rather than as a void
     // that fills — which is also what gives a thread from a shared work
@@ -127,6 +142,7 @@ export function createStream() {
     validate(event);
     events.push(event);
     if (event.e === 'deposit') artifacts.set(event.artifact.id, event.artifact);
+    if (event.night > highestNight) highestNight = event.night;
     for (const fn of listeners) fn(event);
     return event;
   }

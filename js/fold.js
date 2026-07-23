@@ -21,9 +21,10 @@ export { TABLE_ASPECT, fnv1a, mulberry32 } from './geom.js';
 
 // D14 is retired (keeper's ruling): nothing on this table is translucent. A card
 // lies at full strength however old it is, and an opened pile is one brightness
-// throughout. `stratum` stays — it is a true fact about the log — but it no
-// longer reaches the light. What is being read is marked by dimming everything
-// else (D149), which is one meaning on one channel instead of two.
+// throughout. What is being read is marked by dimming everything else (D149),
+// which is one meaning on one channel instead of two. `stratum` went with the
+// dimmer it fed — how deep a card lies is `maxNight - card.night`, for whoever
+// one day wants it.
 const SCALES = { image: 1.15, video: 1.15, fold: 1.05, note: 0.8 }; // §5: subtle, nothing shouts
 
 export const CARD_W = 0.24; // of the canonical short side, before scale — mirrors the renderer's sizing
@@ -233,7 +234,6 @@ export function fold(events, t) {
 
   const cards = live;
   for (const c of cards) {
-    c.stratum = maxNight - c.night;
     c.opacity = 1;
     c.x = round4(c.x);
     c.y = round4(c.y);

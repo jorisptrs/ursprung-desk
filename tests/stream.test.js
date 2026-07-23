@@ -172,3 +172,21 @@ test('the roster: the cohort is a fact in the log, and it only ever adds', () =>
   assert.throws(() => s.append({ e: 'roster', night: 0, people: ['R.', '  '] }), /belongs to a name/);
   assert.throws(() => s.append({ e: 'roster', night: 0, people: 'R.' }), /nobody in it/);
 });
+
+test('the night is said, never worked out — and only ever moves forward (D175)', () => {
+  const s = createStream();
+  assert.ok(s.append({ e: 'night', night: 1 }));
+  assert.throws(() => s.append({ e: 'night', night: 1 }), /already night 1/);
+  assert.throws(() => s.append({ e: 'night', night: 0 }), /already night 1/);
+  assert.ok(s.append({ e: 'night', night: 2 }), 'and a night may skip one, if a day passed unrecorded');
+
+  // a deposit raises it too: the night is the log's, not one event type's
+  const fresh = createStream();
+  fresh.append({ e: 'deposit', night: 3, artifact: artifact({ id: 'x-1' }) });
+  assert.throws(() => fresh.append({ e: 'night', night: 2 }), /already night 3/);
+  assert.ok(fresh.append({ e: 'night', night: 4 }));
+
+  // the first night to begin is 1: night 0 is where the log starts
+  const opening = createStream();
+  assert.throws(() => opening.append({ e: 'night', night: 0 }), /the first night to begin is night 1/);
+});

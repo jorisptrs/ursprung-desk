@@ -52,6 +52,10 @@ Stop it with `lsof -ti:8123 -sTCP:LISTEN | xargs -r kill`. Views: `/` (deployed:
    git worktree remove /tmp/desk-baseline
    ```
 
+## The night (D175)
+
+Both doors lay a card on whatever night the log is already on, and nothing works out that a day has passed. `node mcp/night.mjs` says which night it is; `node mcp/night.mjs next` begins the next one. Once a morning at the retreat — without it every card of four days lands on night 0 and the pass never breaks into waves.
+
 ## Gotchas
 
 - `node --test tests/` fails (tries to load the directory as a module) — use bare `node --test`.

@@ -153,6 +153,7 @@ One append-only stream of events is the whole truth: deposits and threads are bo
     } },
   { "e": "thread", "night": 3, "from": "a-006", "to": "a-014", "why": "same makers" },
   { "e": "roster", "night": 0, "people": ["B.", "M.", "E."] },
+  { "e": "night", "night": 2 },
   { "e": "arrange", "night": 3,
     "places": { "B.": [0.31, 0.22], "M.": [0.55, 0.41], "B. + M.": [0.43, 0.31], "Claude": [0.18, 0.79] },
     "why": "B. and M. are both working on things that will not close." }
@@ -160,6 +161,8 @@ One append-only stream of events is the whole truth: deposits and threads are bo
 ```
 
 Distinctions that carry weight: `media` says how the trace is *drawn*; `kind` says how the card *behaves* (quests spawn faded, failures take the ashen register, fieldnotes are Claude's own, the meta card closes the demo); `people` says whose studio the card lies in, which is why every card names its makers and why nothing arrives anonymously. There is no `practice` field — a self-chosen craft label was one more thing to fill in and a worse signal than the log already carries; **affinity is derived from who worked with whom, and from a reading of the work itself** (D145). `excerpt` is the surface and always present in one of its forms; `detail` is the optional back — absent means the card does not open, and that absence is the entire privacy signal. Hand deposits fill `detail.composition`, the maker's ordered arrangement (text, stills, links, files) rendered on the back exactly as laid out; the flat fields (`assets`, `links`, `note`) stay legal beside it. There is no separate `asset` field: surface assets live in `excerpt`, full assets in `detail`. `provenance` names the door — who performed the gesture — never the medium; media already says what the thing is. The enum grows only if a door does, and new doors trigger the full consent machinery. `visibility` exists from day one because consent tiers cannot be retrofitted; the prototype sets everything to `public`.
+
+`night` says that yesterday ended. Everything else the desk works out for itself — an id from the log, a place from the arrangement, an author from the token — but no amount of reading the log tells you a day has passed, so somebody says so and it is recorded like any other fact. Both doors lay a card on whatever night the log is already on, which is why this is not optional: without it every card of a four-day retreat arrives on night 0 and the table never breaks into the waves it is built to show. It may only move forward — a night that went backwards would re-date every card laid after it. `node mcp/night.mjs next`, once a morning, until step 7 offers the same thing from a session.
 
 `roster` says who the curator registered; the table opens as a room of named empty places rather than a void that fills, and a name written on the wood goes as soon as a card lands on it. Only names travel — the device tokens stay on the room machine.
 
