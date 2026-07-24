@@ -742,6 +742,12 @@ html.rig.rig--still, html.rig.rig--still body { cursor: none; }
   background: var(--room);
 }
 
+.sheet--gate { /* the name picker is always a modal over whatever is behind it, never in the page flow (fixes real clicks landing on the table beneath) */
+  position: fixed;
+  inset: 0;
+  z-index: 1002;
+}
+
 .deposit-body { overflow: auto; }
 
 .sheet__panel {

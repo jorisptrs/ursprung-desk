@@ -291,6 +291,10 @@ async function main() {
       mode: 'overlay', container: document.body, sink: directSink(stream), prefill,
       me: demoMe, people: demoAuthors,
       onSwitchName: demoAuthors.length ? switchDemoName : null,
+      // the author's own cards, so a new one can be linked as a follow-up (D145)
+      myCards: () => stream.all()
+        .filter((e) => e.e === 'deposit' && (e.artifact.people ?? []).includes(demoMe))
+        .map((e) => e.artifact),
     });
   };
 
