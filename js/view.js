@@ -106,8 +106,13 @@ export function createView(field, { rig = false } = {}) {
   // rule is gentle: chains keep the order they were laid, unlinked cards keep their
   // place, and each chain rides at the spot of its earliest card — so the timeline
   // still reads underneath, only the linked ones close ranks.
-  function clusterByChains(cards, threads) {
-    if (cards.length < 3) return cards; // two cards are already side by side
+  // The pile's cards, grouped into chains (each a chain of two-or-more, or a
+  // one-card group), in laid order. `clusterByChains` flattens this — chains
+  // contiguous — for the litThreads set and the count; `spreadPlan` keeps the
+  // groups, to lay each chain as its own row (D204's timeline).
+  function chainGroups(cards, threads) {
+    const singles = () => cards.map((c) => [c]);
+    if (cards.length < 3) return singles(); // two cards are already side by side
     const order = new Map(cards.map((c, i) => [c.id, i]));
     const parent = new Map(cards.map((c) => [c.id, c.id]));
     const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
@@ -119,14 +124,15 @@ export function createView(field, { rig = false } = {}) {
         if (a !== b) { parent.set(a, b); tied = true; }
       }
     }
-    if (!tied) return cards; // nothing ties inside the pile — the timeline stands (D161)
+    if (!tied) return singles(); // nothing ties inside the pile — the timeline stands (D161)
     const chains = new Map(); // root → its cards, in the order they were laid
     for (const c of cards) {
       const r = find(c.id);
       (chains.get(r) ?? chains.set(r, []).get(r)).push(c);
     }
-    return [...chains.values()].sort((p, q) => order.get(p[0].id) - order.get(q[0].id)).flat();
+    return [...chains.values()].sort((p, q) => order.get(p[0].id) - order.get(q[0].id));
   }
+  const clusterByChains = (cards, threads) => chainGroups(cards, threads).flat();
 
   // The studios an open studio reaches into: everyone its gathered collaborations
   // were made with, itself aside — named at their places while the stack is read
@@ -153,27 +159,51 @@ export function createView(field, { rig = false } = {}) {
   function spreadPlan() {
     const key = `${openPile}·${Math.round(rect.w)}×${Math.round(rect.h)}`;
     if (spreadCache?.key === key) { openBloomShift = spreadCache.shift; return spreadCache.plan; }
-    const group = inOpenPile();
+    const units = chainGroups(lastState.cards.filter(inSpread), lastState.threads);
+    const group = units.flat(); // = inOpenPile(): the litThreads order and the count
     let plan = null;
     let shift = { dx: 0, dy: 0 };
     if (group.length > 1) {
       const gap = Math.max(6, short() * 0.012); // the thin margin between cards
-      const sizes = group.map((c) => {
+      // a studio's cards ring its @name, so its centre cell holds the name's air;
+      // a shared place carries no name, so the cards close ranks around the point
+      const isStudio = !openPile.startsWith('~');
+      const nameEl = isStudio ? markEls.get(openPile) : null;
+      const nameW = nameEl?.offsetWidth || short() * 0.05;
+      const nameH = nameEl?.offsetHeight || short() * 0.028;
+      const hole = isStudio ? { w: nameW + gap * 3, h: nameH + gap * 3 } : { w: 0, h: 0 };
+      // when cards build on one another they read as a ROW — the chain laid whole,
+      // its loose neighbours packed into rows beside it — and the name sits in the
+      // middle of those rows (D204). A pile with no such chain keeps the plain grid.
+      const hasChain = units.some((u) => u.length >= 2);
+      let ordered = group;
+      let rowLens = null;
+      if (hasChain) {
+        const cols = Math.max(2, ...units.map((u) => u.length), Math.round(Math.sqrt(group.length)));
+        const rows = [];
+        let loose = [];
+        const flush = () => { if (loose.length) { rows.push(loose); loose = []; } };
+        for (const u of units) {
+          if (u.length >= 2) { flush(); rows.push(u); } // a chain is a row of its own
+          else { loose.push(u[0]); if (loose.length >= cols) flush(); } // loose cards pack
+        }
+        flush();
+        ordered = rows.flat();
+        rowLens = rows.map((r) => r.length);
+      }
+      const sizes = ordered.map((c) => {
         const el = cardEls.get(c.id);
         const { w, h } = cardSizePx(c);
         return { w: el?.offsetWidth || w, h: el?.offsetHeight || h };
       });
-      // the name at the centre needs its own air; the cards bloom around it
-      const nameEl = markEls.get(openPile);
-      const nameW = nameEl?.offsetWidth || short() * 0.05;
-      const nameH = nameEl?.offsetHeight || short() * 0.028;
-      const hole = { w: nameW + gap * 3, h: nameH + gap * 3 };
-      const spread = spreadAround(sizes, gap, hole);
-      // the pile's own place — where its name is written (fold.js centres the
-      // cascade on it); a shared place has no name, so its cards' centroid serves
+      const spread = spreadAround(sizes, gap, hole, rowLens);
+      // the place the pile stood on — the studio's, or the shared place a
+      // collaboration keeps between its makers (D140) — so the bloom opens AROUND
+      // that point rather than drifting off to the cards' own centroid.
       const studio = lastState.studios?.find((s) => s.name === openPile);
-      const px = (studio ? studio.place[0] : group.reduce((a, c) => a + c.x, 0) / group.length) * rect.w;
-      const py = (studio ? studio.place[1] : group.reduce((a, c) => a + c.y, 0) / group.length) * rect.h;
+      const place = studio ? studio.place : lastState.places?.[openPile.replace(/^~/, '')];
+      const px = (place ? place[0] : group.reduce((a, c) => a + c.x, 0) / group.length) * rect.w;
+      const py = (place ? place[1] : group.reduce((a, c) => a + c.y, 0) / group.length) * rect.h;
       // keep the whole bloom in the light, nudged only as far as it must be — and
       // never so far the name leaves the gap it shows through
       let minx = 0; let maxx = 0; let miny = 0; let maxy = 0;
@@ -195,7 +225,7 @@ export function createView(field, { rig = false } = {}) {
       const ox = nudge(px, minx, maxx, rect.w);
       const oy = nudge(py, miny, maxy, rect.h);
       shift = { dx: ox, dy: oy };
-      plan = new Map(group.map((c, i) => [c.id, {
+      plan = new Map(ordered.map((c, i) => [c.id, {
         dx: px + ox + spread.offsets[i].dx - c.x * rect.w,
         dy: py + oy + spread.offsets[i].dy - c.y * rect.h,
       }]));

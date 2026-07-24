@@ -218,25 +218,65 @@ export function arrange(people, pairs = [], previous = {}, { steps = STEPS, drif
 // the whole cluster is then shifted so that empty cell sits at the origin, which
 // is where the name is written. Sizes in (+ a `hole` for the name), offsets from
 // the name out — one per card, in order. Pure — no DOM, no clock.
-export function spreadAround(sizes, gap = 8, hole = { w: 0, h: 0 }) {
+export function spreadAround(sizes, gap = 8, hole = { w: 0, h: 0 }, rowLens = null) {
   const list = (sizes ?? []).filter((s) => s && s.w > 0 && s.h > 0);
   const n = list.length;
   if (!n) return { offsets: [], w: 0, h: 0 };
-  const cells = list.map((s) => ({ w: s.w, h: s.h, hole: false }));
-  cells.splice(Math.floor(n / 2), 0, { w: hole.w, h: hole.h, hole: true }); // the name's cell, mid reading-order
-  const m = cells.length;
-  const cols = Math.max(1, Math.min(m, Math.round(Math.sqrt(m * 1.6)))); // squarish, a touch wide, so it stays near the name
-  const rows = [];
-  for (let i = 0; i < m; i += cols) rows.push(cells.slice(i, i + cols));
-  const rowW = rows.map((r) => r.reduce((s, c) => s + c.w, 0) + gap * (r.length - 1));
-  const rowH = rows.map((r) => Math.max(...r.map((c) => c.h)));
-  const h = rowH.reduce((a, b) => a + b, 0) + gap * (rows.length - 1);
+  // Pre-grouped into rows (each a chain, or packed loose cards): lay each row whole
+  // and stacked, and drop the name into the MIDDLE of the middle row — so the chains
+  // read as rows and the name sits among them (D204). The grid below is the no-chain
+  // fall-back and what the unit tests exercise.
+  if (rowLens) {
+    const cardRows = [];
+    let idx = 0;
+    for (const len of rowLens) { cardRows.push(list.slice(idx, idx + len).map((s) => ({ ...s, hole: false }))); idx += len; }
+    if ((hole.w > 0 || hole.h > 0) && cardRows.length) {
+      const mid = Math.floor(cardRows.length / 2);
+      cardRows[mid].splice(Math.floor(cardRows[mid].length / 2), 0, { w: hole.w, h: hole.h, hole: true });
+    }
+    const rowW = cardRows.map((r) => r.reduce((s, c) => s + c.w, 0) + gap * (r.length - 1));
+    const rowH = cardRows.map((r) => Math.max(...r.map((c) => c.h)));
+    const h = rowH.reduce((a, b) => a + b, 0) + gap * (cardRows.length - 1);
+    const w = Math.max(...rowW);
+    const raw = []; let hx = 0; let hy = 0; let y = -h / 2;
+    cardRows.forEach((row, ri) => {
+      let x = -rowW[ri] / 2;
+      for (const c of row) {
+        const pos = { dx: x + c.w / 2, dy: y + rowH[ri] / 2 };
+        if (c.hole) { hx = pos.dx; hy = pos.dy; } else raw.push(pos);
+        x += c.w + gap;
+      }
+      y += rowH[ri] + gap;
+    });
+    return { offsets: raw.map((o) => ({ dx: o.dx - hx, dy: o.dy - hy })), w, h };
+  }
+  // a studio keeps a centre cell for its @name; a shared place has none, so its
+  // cards simply centre on the point (their own cluster straddles it).
+  const named = hole.w > 0 || hole.h > 0;
+  const m = named ? n + 1 : n;
+  // a square grid (not the old touch-wide one), so the cards ring the name rather
+  // than run off beside it
+  const cols = Math.max(1, Math.min(m, Math.round(Math.sqrt(m))));
+  const rows = Math.ceil(m / cols);
+  // the name takes the grid's CENTRE cell — not the reading-middle, which landed
+  // in an early row and pushed every card into one corner — so the cards fill the
+  // rest in order around it and the name ends up surrounded (keeper's ruling,
+  // amends D192's centring).
+  const nameIdx = named ? Math.min(m - 1, Math.floor(rows / 2) * cols + Math.floor(cols / 2)) : -1;
+  const cells = [];
+  let ci = 0;
+  for (let i = 0; i < m; i++) cells.push(i === nameIdx ? { w: hole.w, h: hole.h, hole: true } : { ...list[ci++], hole: false });
+  const grid = [];
+  for (let i = 0; i < m; i += cols) grid.push(cells.slice(i, i + cols));
+  const rowW = grid.map((r) => r.reduce((s, c) => s + c.w, 0) + gap * (r.length - 1));
+  const rowH = grid.map((r) => Math.max(...r.map((c) => c.h)));
+  const h = rowH.reduce((a, b) => a + b, 0) + gap * (grid.length - 1);
   const w = Math.max(...rowW);
   const raw = [];
   let hx = 0;
   let hy = 0;
   let y = -h / 2;
-  rows.forEach((row, ri) => {
+  grid.forEach((row, ri) => {
     let x = -rowW[ri] / 2;
     for (const c of row) {
       const pos = { dx: x + c.w / 2, dy: y + rowH[ri] / 2, hole: c.hole };
@@ -245,7 +285,7 @@ export function spreadAround(sizes, gap = 8, hole = { w: 0, h: 0 }) {
     }
     y += rowH[ri] + gap;
   });
-  // put the name's empty cell at the origin, so the name is what shows there
+  // put the name's empty cell at the origin, so the cards sit around where the name is written
   const offsets = raw.map((o) => ({ dx: o.dx - hx, dy: o.dy - hy }));
   return { offsets, w, h };
 }

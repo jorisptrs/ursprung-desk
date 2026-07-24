@@ -1511,7 +1511,7 @@ export function openSheet({
       const m = String(err?.message ?? err);
       if (m.includes('no table')) { // silence is not refusal — the deck keeps it (D99)
         await stash({ quiet: true });
-        say("can't reach the table · kept in the deck"); // terse, but say the card is safe (D99)
+        say("can't reach the table");
       } else {
         say(m);
       }
