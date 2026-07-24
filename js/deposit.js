@@ -961,7 +961,7 @@ export function openSheet({
   }
   // the register Claude alone may set (D98) — inline with the rest now, since the
   // heading reads them all; a second tap on it goes back to work.
-  const flag = h('span', 'sheet__opt', KIND_LABELS.failure);
+  const flag = h('span', 'sheet__opt sheet__flag', KIND_LABELS.failure); // .sheet__flag pushes it to the line's far right (desk.css, D98)
   flag.dataset.means = KIND_MEANS.failure;
   flag.addEventListener('click', () => {
     state.kind = state.kind === 'failure' ? 'work' : 'failure';
