@@ -31,7 +31,7 @@ rmSync('/tmp/desk-e2e-profile', { recursive: true, force: true });
 const shell = spawn(SHELL, [
   '--headless', '--disable-gpu', '--window-size=1440,900', '--hide-scrollbars',
   `--remote-debugging-port=${PORT}`, '--user-data-dir=/tmp/desk-e2e-profile',
-  'http://localhost:8123/?debug',
+  'http://localhost:8123/?debug&seed=seed.json', // the bare fixture: no demo author-identity, so the empty-page assertions hold
 ], { stdio: 'ignore' });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

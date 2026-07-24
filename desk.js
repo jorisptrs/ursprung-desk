@@ -13,7 +13,7 @@ import { createTimeline, pacing } from './js/timeline.js';
 import { createQueue, sleep } from './js/queue.js';
 import { createView } from './js/view.js';
 import { attachDriver, attachHelper } from './js/driver.js';
-import { openSheet, directSink, attachBroadcastReceiver, warmEditor } from './js/deposit.js';
+import { openSheet, directSink, attachBroadcastReceiver, warmEditor, claimGate } from './js/deposit.js';
 import { attachLivePickup } from './js/live.js';
 
 const params = new URLSearchParams(location.search);
@@ -48,7 +48,9 @@ async function loadEvents() {
   // without touching seed.json, which the tests fixture on. Name only: no path,
   // no protocol, so a link can never point the table at someone else's file.
   const named = params.get('seed');
-  const file = /^[\w.-]+\.json$/.test(named ?? '') ? named : 'seed.json';
+  // The deployed root shows the curated demo (our own assets, the J/R/C cohort);
+  // seed.json stays the bare fixture the tests load by name (?seed=seed.json).
+  const file = /^[\w.-]+\.json$/.test(named ?? '') ? named : 'seed-demo.json';
   const res = await fetch(file);
   return (await res.json()).events;
 }
@@ -60,6 +62,15 @@ async function main() {
   const tailCount = Math.min(Math.max(0, parseInt(params.get('tail'), 10) || 0), loaded.length);
   const heldTail = tailCount ? loaded.slice(loaded.length - tailCount) : [];
   for (const ev of tailCount ? loaded.slice(0, loaded.length - tailCount) : loaded) stream.append(ev);
+
+  // The demo's identity: with no room server, a visitor is one of the seed's own
+  // cohort — Claude excluded, since Claude is never the hand behind a deposit.
+  // The bare fixture (?seed=seed.json, what the e2e drives) stays without it.
+  const rosterEvent = loaded.find((e) => e.e === 'roster');
+  const demoAuthors = (params.get('seed') === 'seed.json' || !rosterEvent)
+    ? []
+    : rosterEvent.people.filter((n) => n !== 'Claude');
+  let demoMe = demoAuthors[0] ?? null;
 
   const rig = params.has('rig');
   const live = params.has('live');
@@ -266,8 +277,21 @@ async function main() {
   // channel — the rig included, where held mode holds arrivals until L arms it.
   attachBroadcastReceiver(stream);
   const sheetOpen = () => document.querySelector('.sheet') != null;
+  // Tapping the name picks another of the cohort and reopens signed as them —
+  // the same claimGate the castle uses (D138), here fed by the seed's roster.
+  const switchDemoName = async () => {
+    document.querySelector('.sheet')?.remove();
+    const got = await claimGate({ container: document.body, people: demoAuthors, me: demoMe, onClaim: async (name) => ({ name }) });
+    demoMe = got.name;
+    openTheSheet();
+  };
   const openTheSheet = (prefill = null) => {
-    if (!sheetOpen()) openSheet({ mode: 'overlay', container: document.body, sink: directSink(stream), prefill });
+    if (sheetOpen()) return;
+    openSheet({
+      mode: 'overlay', container: document.body, sink: directSink(stream), prefill,
+      me: demoMe, people: demoAuthors,
+      onSwitchName: demoAuthors.length ? switchDemoName : null,
+    });
   };
 
   // The ? on the table, from the start (D77): plain help for every visitor,
