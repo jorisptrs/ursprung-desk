@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 460">
+  <defs>
+    <radialGradient id="melt" cx="0.5" cy="0.62" r="0.55">
+      <stop offset="0" stop-color="#f2c073"/>
+      <stop offset="0.35" stop-color="#d68a3c"/>
+      <stop offset="0.7" stop-color="#7c3f22"/>
+      <stop offset="1" stop-color="#2c211c"/>
+    </radialGradient>
+    <radialGradient id="glassv" cx="0.5" cy="0.5" r="0.75">
+      <stop offset="0.5" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.42"/>
+    </radialGradient>
+  </defs>
+  <rect width="640" height="460" fill="#241c18"/>
+  <ellipse cx="320" cy="286" rx="150" ry="130" fill="url(#melt)"/>
+  <ellipse cx="320" cy="250" rx="60" ry="40" fill="#ffe0a0" opacity="0.55"/>
+  <path d="M320 250 Q322 150 318 70" stroke="#f0c988" stroke-width="6" fill="none" opacity="0.5"/>
+  <rect width="640" height="460" fill="url(#glassv)"/>
+</svg>

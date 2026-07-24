@@ -12,13 +12,14 @@ export const specimenEvents = [
   { e: 'deposit', night: 1, artifact: {
     id: 's-001', media: 'image', kind: 'work', title: 'jazz coding, resumed',
     caption: 'one phone, six hands · the walk', people: ['M.', 'L.', 'T.'], provenance: 'hand', visibility: 'public',
-    excerpt: { form: 'crop', src: 'assets/placeholder-photo.svg' } } },
+    excerpt: { form: 'crop', src: 'assets/placeholder-photo.svg' },
+    detail: { experience: { mode: 'visit', src: 'https://example.org/jazz-coding' } } } }, // the visit door, kept exercised (was on s-009)
 
   { e: 'deposit', night: 2, artifact: {
     id: 's-002', media: 'audio', kind: 'work', title: 'kettle drone, take 4',
     caption: 'audio · four minutes', people: ['B.', 'Claude'], provenance: 'curator', visibility: 'public',
     excerpt: { form: 'waveform', src: 'assets/placeholder-waveform.svg' },
-    detail: { experience: { mode: 'play', src: 'assets/Test.m4a' } } } },
+    detail: { experience: { mode: 'play', src: 'assets/audio-drone.m4a' } } } },
 
   { e: 'deposit', night: 2, artifact: {
     id: 's-003', media: 'video', kind: 'work', title: 'the walk, filmed',
@@ -57,7 +58,7 @@ export const specimenEvents = [
     id: 's-009', media: 'model', kind: 'work', title: 'the zither, drawn',
     caption: 'wireframe · one screen', people: ['Y.', 'Claude'], provenance: 'mcp', visibility: 'public',
     excerpt: { form: 'render', src: 'assets/placeholder-render.svg' },
-    detail: { experience: { mode: 'visit', src: 'https://example.org/zither' } } } },
+    detail: { experience: { mode: 'play', src: 'assets/model-fold.obj' } } } }, // turns to its 3D on the back (D190)
 
   { e: 'deposit', night: 3, artifact: {
     id: 's-011', media: 'note', kind: 'fieldnotes', title: 'the fold and the drone are one problem',

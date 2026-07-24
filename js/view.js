@@ -7,7 +7,8 @@
 // table.
 
 import { renderCard, backModel } from './cards.js';
-import { packSpread } from './layout.js';
+import { mountModel } from './model3d.js';
+import { spreadAround } from './layout.js';
 import { CARD_W, NOMINAL_H } from './fold.js';
 import { sleep } from './queue.js';
 import { isPlace } from './stream.js';
@@ -58,6 +59,15 @@ export function createView(field, { rig = false } = {}) {
   field.append(marks);
   const markEls = new Map(); // person → element
 
+  // Names at the ends of the threads that show while a stack is read (D183): a
+  // thread reaching a collaborator's studio would otherwise land on a pile with
+  // no word on it — so the collaborator's name is set right where it lands, above
+  // the cards, in the thread's own amber. Cleared the moment nothing is open.
+  const nameLayer = document.createElement('div');
+  nameLayer.className = 'endnames';
+  field.append(nameLayer);
+  const nameEls = new Map(); // person → element
+
   const short = () => Math.min(rect.w, rect.h);
   let lastPointer = { x: 0, y: 0 }; // where a press landed, for seeking along a line
   field.addEventListener('pointerdown', (e) => { lastPointer = { x: e.clientX, y: e.clientY }; }, true);
@@ -87,18 +97,65 @@ export function createView(field, { rig = false } = {}) {
     if (pileKey(card) === openPile) return true;
     return !openPile.startsWith('~') && (card.makers ?? []).includes(openPile);
   };
-  const inOpenPile = () => (openPile ? lastState.cards.filter(inSpread) : []);
+  const inOpenPile = () => (openPile ? clusterByChains(lastState.cards.filter(inSpread), lastState.threads) : []);
+
+  // Related cards sit together when a studio opens (keeper's ruling — amends D161's
+  // pure timeline): a card and the one it builds on, or any two of the pile's cards
+  // a thread ties, are pulled adjacent, so a quest and the work that answered it
+  // read as one line of thinking instead of drifting apart in the deal order. The
+  // rule is gentle: chains keep the order they were laid, unlinked cards keep their
+  // place, and each chain rides at the spot of its earliest card — so the timeline
+  // still reads underneath, only the linked ones close ranks.
+  function clusterByChains(cards, threads) {
+    if (cards.length < 3) return cards; // two cards are already side by side
+    const order = new Map(cards.map((c, i) => [c.id, i]));
+    const parent = new Map(cards.map((c) => [c.id, c.id]));
+    const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+    let tied = false;
+    for (const t of threads) {
+      // a card-to-card tie (not a studio anchor), both ends laid in this pile
+      if (t.to && order.has(t.from) && order.has(t.to)) {
+        const a = find(t.from); const b = find(t.to);
+        if (a !== b) { parent.set(a, b); tied = true; }
+      }
+    }
+    if (!tied) return cards; // nothing ties inside the pile — the timeline stands (D161)
+    const chains = new Map(); // root → its cards, in the order they were laid
+    for (const c of cards) {
+      const r = find(c.id);
+      (chains.get(r) ?? chains.set(r, []).get(r)).push(c);
+    }
+    return [...chains.values()].sort((p, q) => order.get(p[0].id) - order.get(q[0].id)).flat();
+  }
+
+  // The studios an open studio reaches into: everyone its gathered collaborations
+  // were made with, itself aside — named at their places while the stack is read
+  // (D185), so a thread running to a neighbour lands on a word rather than on a
+  // dim pile. Their stacks are not otherwise touched.
+  let collabStudios = new Set();
+  function refreshCollab() {
+    const s = new Set();
+    if (openPile && !openPile.startsWith('~')) {
+      for (const c of inOpenPile()) {
+        if (pileKey(c) === openPile) continue; // a solo card is not a collaboration
+        for (const m of c.makers ?? []) if (m && m !== openPile) s.add(m);
+      }
+    }
+    collabStudios = s;
+  }
 
   // Where a card of the open pile lies, in px from where it lies stacked. The
-  // pile opens to exactly the room its own cards need — a pile of two goes two
-  // wide, a pile of one grows nothing — and the block is nudged back inside the
-  // light, so a studio at the edge opens inward rather than off the table.
+  // pile blooms out from the place it stood on and stays centred there (D192):
+  // the cards open around the studio's own name, which shows through the gap
+  // left at the centre, rather than reflowing into a row that drifts off it.
   let spreadCache = null;
+  let openBloomShift = { dx: 0, dy: 0 }; // px the open bloom was pushed to stay in the light; its name rides the same shift
   function spreadPlan() {
     const key = `${openPile}·${Math.round(rect.w)}×${Math.round(rect.h)}`;
-    if (spreadCache?.key === key) return spreadCache.plan;
+    if (spreadCache?.key === key) { openBloomShift = spreadCache.shift; return spreadCache.plan; }
     const group = inOpenPile();
     let plan = null;
+    let shift = { dx: 0, dy: 0 };
     if (group.length > 1) {
       const gap = Math.max(6, short() * 0.012); // the thin margin between cards
       const sizes = group.map((c) => {
@@ -106,23 +163,45 @@ export function createView(field, { rig = false } = {}) {
         const { w, h } = cardSizePx(c);
         return { w: el?.offsetWidth || w, h: el?.offsetHeight || h };
       });
-      // wide rows, because a studio opened is a sequence to follow along: the
-      // oldest at the top left, the newest at the end (D161)
-      const pack = packSpread(sizes, gap, rect.w * 0.8);
-      // the studio's own place is the middle of its stack (fold.js), so the
-      // spread opens around the same point the pile stood on
-      const [cx, cy] = [group[0].x * rect.w, group[0].y * rect.h];
-      const m = Math.max(8, short() * 0.015);
-      const fit = (c, size, max) =>
-        size + m * 2 >= max ? max / 2 : Math.min(Math.max(c, size / 2 + m), max - size / 2 - m);
-      const ox = fit(cx, pack.w, rect.w) - cx;
-      const oy = fit(cy, pack.h, rect.h) - cy;
+      // the name at the centre needs its own air; the cards bloom around it
+      const nameEl = markEls.get(openPile);
+      const nameW = nameEl?.offsetWidth || short() * 0.05;
+      const nameH = nameEl?.offsetHeight || short() * 0.028;
+      const hole = { w: nameW + gap * 3, h: nameH + gap * 3 };
+      const spread = spreadAround(sizes, gap, hole);
+      // the pile's own place — where its name is written (fold.js centres the
+      // cascade on it); a shared place has no name, so its cards' centroid serves
+      const studio = lastState.studios?.find((s) => s.name === openPile);
+      const px = (studio ? studio.place[0] : group.reduce((a, c) => a + c.x, 0) / group.length) * rect.w;
+      const py = (studio ? studio.place[1] : group.reduce((a, c) => a + c.y, 0) / group.length) * rect.h;
+      // keep the whole bloom in the light, nudged only as far as it must be — and
+      // never so far the name leaves the gap it shows through
+      let minx = 0; let maxx = 0; let miny = 0; let maxy = 0;
+      spread.offsets.forEach((o, i) => {
+        minx = Math.min(minx, o.dx - sizes[i].w / 2); maxx = Math.max(maxx, o.dx + sizes[i].w / 2);
+        miny = Math.min(miny, o.dy - sizes[i].h / 2); maxy = Math.max(maxy, o.dy + sizes[i].h / 2);
+      });
+      const M = Math.max(8, short() * 0.02);
+      const nudge = (p, lo, hi, max) => {
+        let d = 0;
+        if (p + hi > max - M) d -= (p + hi) - (max - M);
+        if (p + lo + d < M) d += M - (p + lo + d);
+        return d;
+      };
+      // push the whole bloom into the pool as far as it must go, so no card of an
+      // edge stack spills off-window. The studio's name rides the same shift (it is
+      // re-placed below), so it keeps showing through the gap at the centre — D192
+      // holds, only the cap that pinned the name and let edge piles overflow is gone.
+      const ox = nudge(px, minx, maxx, rect.w);
+      const oy = nudge(py, miny, maxy, rect.h);
+      shift = { dx: ox, dy: oy };
       plan = new Map(group.map((c, i) => [c.id, {
-        dx: ox + pack.offsets[i].dx + cx - c.x * rect.w,
-        dy: oy + pack.offsets[i].dy + cy - c.y * rect.h,
+        dx: px + ox + spread.offsets[i].dx - c.x * rect.w,
+        dy: py + oy + spread.offsets[i].dy - c.y * rect.h,
       }]));
     }
-    spreadCache = { key, plan };
+    openBloomShift = shift;
+    spreadCache = { key, plan, shift };
     return plan;
   }
 
@@ -147,7 +226,6 @@ export function createView(field, { rig = false } = {}) {
   // so nothing but the compositor is asked to work.
   const MOVE_MS = 620;
   let boxesBefore = null;
-  let threadsBefore = null;
   let instant = false; // the still surfaces never travel (D62)
 
   // Whether anything has been rearranged, asked of the fold's own places rather
@@ -167,27 +245,12 @@ export function createView(field, { rig = false } = {}) {
   function watchMoves() {
     boxesBefore = new Map();
     for (const [id, el] of cardEls) boxesBefore.set(id, el.getBoundingClientRect());
-    // and the strings, which are px and re-laid rather than re-flowed: without
-    // this they snapped to where the piles are going while the piles were still
-    // on their way, which is the one thing that made a move look wrong
-    threadsBefore = new Map();
-    for (const [key, el] of threadEls) {
-      if (el.style.display !== 'none' && el.style.transform) threadsBefore.set(key, el.style.transform);
-    }
   }
 
   function playMoves() {
     const before = boxesBefore;
-    const strings = threadsBefore;
     boxesBefore = null;
-    threadsBefore = null;
     if (!before || rig) return;
-    for (const [key, el] of threadEls) {
-      const was = strings?.get(key);
-      const now = el.style.transform;
-      if (!was || !now || was === now || el.style.display === 'none') continue;
-      track(el.animate([{ transform: was }, { transform: now }], { duration: MOVE_MS, easing: EASE }));
-    }
     for (const [id, el] of cardEls) {
       const was = before.get(id);
       if (!was) continue; // it was not on the table a moment ago: an arrival, which snaps
@@ -201,6 +264,12 @@ export function createView(field, { rig = false } = {}) {
         { duration: MOVE_MS, easing: EASE },
       ));
     }
+    // and the strings follow the cards rather than being animated beside them:
+    // interpolating a thread's own transform let its ends drift off the paper
+    // mid-move, since a straight line between two moving points is not itself a
+    // straight tween. They are recomputed each frame from the live boxes instead,
+    // opening from where the cards were so nothing jumps to the destination first.
+    trackThreads(MOVE_MS, before);
   }
 
   // What a thread must stop short of at a studio's place: the pile standing
@@ -208,24 +277,43 @@ export function createView(field, { rig = false } = {}) {
   // Never the bare point, which is the middle of the stack and would run the
   // string in under the cards and out the other side.
   const MARK_GAP = 5; // px of air between the string and what it points at
-  function placeBoxPx(thread, state, from) {
+  function placeBoxPx(thread, state, from, fr = null, old = null) {
     const [px, py] = thread.toPlace;
     const cx = px * rect.w;
     const cy = py * rect.h;
     const bare = { cx, cy, x1: cx, y1: cy, x2: cx, y2: cy };
 
-    // The card of that pile the string actually meets, not the box around all of
-    // them: a pile cascades, so its bounding box has empty corners, and stopping
-    // at one of those leaves the string ending in mid-air beside the stack.
+    // While a stack is read, the collaborator a thread reaches wears an amber
+    // @name pill at its place (D183/D185) — that pill is the target, and the string
+    // must land ON it, not short of it at a cascade-offset near card. A pile's front
+    // card can sit well off the place it stands on, so stopping there left the thread
+    // ending short of the very name it points at — two-thirds of the way, on a
+    // deeper pile. When the pill is set, reach the name; only at rest (no pill) does
+    // the string stop at the pile itself, which it must not run under. Not the OPEN
+    // studio's own pill, though: its name rides the bloom's shift (D195) while the
+    // place here does not, and an anchor to the pile you already opened is redundant
+    // — it stays the short internal stub it always was.
+    const name = thread.toStack === openPile ? null : nameEls.get(thread.toStack);
+    if (name) {
+      const w = name.offsetWidth / 2 + MARK_GAP;
+      const h = name.offsetHeight / 2 + MARK_GAP;
+      return { cx, cy, x1: cx - w, y1: cy - h, x2: cx + w, y2: cy + h };
+    }
+
+    // at rest, the card of that pile the string actually meets, not the box around
+    // all of them: a pile cascades, so its bounding box has empty corners, and
+    // stopping at one leaves the string ending in mid-air beside the stack. Chosen
+    // by the model's own centres (cheap), measured live while a pile is rearranged.
     const mine = state.cards.filter((c) => (c.pile ?? c.between) === thread.toStack);
     if (mine.length) {
-      const boxes = mine.map((c) => cardBoxPx(c));
-      const near = boxes.reduce((best, b) =>
-        (Math.hypot(b.cx - from.cx, b.cy - from.cy) < Math.hypot(best.cx - from.cx, best.cy - from.cy) ? b : best));
+      const near = mine.reduce((best, c) =>
+        (Math.hypot(c.x * rect.w - from.cx, c.y * rect.h - from.cy)
+          < Math.hypot(best.x * rect.w - from.cx, best.y * rect.h - from.cy) ? c : best));
+      const b = cardBoxPx(near, fr, old);
       return {
         cx, cy,
-        x1: near.x1 - MARK_GAP, y1: near.y1 - MARK_GAP,
-        x2: near.x2 + MARK_GAP, y2: near.y2 + MARK_GAP,
+        x1: b.x1 - MARK_GAP, y1: b.y1 - MARK_GAP,
+        x2: b.x2 + MARK_GAP, y2: b.y2 + MARK_GAP,
       };
     }
 
@@ -236,16 +324,32 @@ export function createView(field, { rig = false } = {}) {
     return { cx, cy, x1: cx - w, y1: cy - h, x2: cx + w, y2: cy + h };
   }
 
-  const cardBoxPx = (card) => {
-    // prefer the real rendered box (content-driven heights, the D66 floor);
-    // the model is the fallback before a card has ever laid down
+  const cardBoxPx = (card, fr = null, old = null) => {
+    // where the card was as the move began (the first tracked frame), so the
+    // strings start from the cards rather than from where they are headed
+    const was = old?.get(card.id);
+    if (was) return was;
     const el = cardEls.get(card.id);
+    // mid-move: the card's real box right now, the one the compositor is
+    // animating, so a thread stays fixed to its edge instead of snapping to where
+    // the card will come to rest (fr is the field's own rect, to make it local).
+    if (fr && el) {
+      const r = el.getBoundingClientRect();
+      const cx = r.left - fr.left + r.width / 2;
+      const cy = r.top - fr.top + r.height / 2;
+      return { x1: cx - r.width / 2, y1: cy - r.height / 2, x2: cx + r.width / 2, y2: cy + r.height / 2, cx, cy };
+    }
+    // at rest, the model box: prefer the real rendered size (content-driven
+    // heights, the D66 floor), the model the fallback before a card has laid down
     const { w: mw, h: mh } = cardSizePx(card);
     const w = el?.offsetWidth || mw;
     const h = el?.offsetHeight || mh;
-    const spread = spreadOf(card);
-    const cx = card.x * rect.w + (spread?.dx ?? 0);
-    const cy = card.y * rect.h + (spread?.dy ?? 0);
+    // a card in hand is grown and slid into the light: its centre is the flip
+    // pose, not the place it lies, so a thread leaves from where the card actually
+    // is (D73); otherwise the spread offset while its pile is open.
+    const off = card.id === flippedId && el ? flipPose(card, el, 'read') : spreadOf(card);
+    const cx = card.x * rect.w + (off?.dx ?? 0);
+    const cy = card.y * rect.h + (off?.dy ?? 0);
     return { x1: cx - w / 2, y1: cy - h / 2, x2: cx + w / 2, y2: cy + h / 2, cx, cy };
   };
 
@@ -438,17 +542,17 @@ export function createView(field, { rig = false } = {}) {
   // rects so the line is visible end to end (nothing draws under paper). An
   // anchor runs from a shared work to a studio's place rather than to another
   // card — that end is a point on the table, so nothing is trimmed off it.
-  function threadGeom(thread, state) {
+  function threadGeom(thread, state, fr = null, old = null) {
     const byId = new Map(state.cards.map((c) => [c.id, c]));
     const a = byId.get(thread.from);
     if (!a) return null;
-    const A = cardBoxPx(a);
+    const A = cardBoxPx(a, fr, old);
     // An anchor runs to a studio's place, which is the middle of its stack. Where
     // the studio stands empty its name is written there, so the thread backs off
     // that name's own box rather than running through the letters.
     const B = thread.toPlace
-      ? placeBoxPx(thread, state, A)
-      : cardBoxPx(byId.get(thread.to) ?? {});
+      ? placeBoxPx(thread, state, A, fr, old)
+      : cardBoxPx(byId.get(thread.to) ?? {}, fr, old);
     if (!thread.toPlace && !byId.get(thread.to)) return null;
     const dx = B.cx - A.cx;
     const dy = B.cy - A.cy;
@@ -471,23 +575,84 @@ export function createView(field, { rig = false } = {}) {
   const threadTransform = (g, scale = 1) =>
     `translate(${g.x.toFixed(1)}px, ${g.y.toFixed(1)}px) rotate(${g.angle.toFixed(4)}rad) scaleX(${(g.len * scale).toFixed(1)})`;
 
-  // What a thread claims, and when it says so (keeper's ruling 2026-07-23).
-  // An anchor holds a shared work between the studios that made it, and is
-  // always drawn: without it the card is an orphan in a gap. Every other
-  // thread is a claim about two works — a quest answered, a problem shared —
-  // and at castle scale drawing them all at once is a web. So they wait for
-  // their card to be picked up, which is the gesture that already means
-  // "tell me more about this one". The cartography comes back whole at replay
-  // and at the closing ceremony, where the map is the point.
+  // What a thread claims, and when it says so (D181, amends the 2026-07-23
+  // policy). At rest the anchors alone are drawn — each holds a
+  // floating work between the hands that made it, and without it the card is an
+  // orphan in a gap. Open a stack, or take a card in hand, and the threads that
+  // show are that stack's own story: its collaborations reaching out to the
+  // collaborators' studios, its quest reaching the work that answered it. The
+  // rest of the web recedes, so a studio opened reads as one thread of thinking
+  // (D173) rather than the whole castle at once — and the cartography comes back
+  // whole at replay, where the map is the point.
+  let litThreads = new Set();
+  function refreshLitThreads() {
+    litThreads = new Set(openPile ? inOpenPile().map((c) => c.id) : []);
+    if (flippedId != null) litThreads.add(flippedId);
+  }
   const threadShows = (thread) =>
-    thread.anchor || (flippedId != null && (thread.from === flippedId || thread.to === flippedId));
+    (litThreads.size
+      ? litThreads.has(thread.from) || litThreads.has(thread.to)
+      : thread.anchor);
 
   function settleThread(el, thread, state) {
     const g = threadShows(thread) ? threadGeom(thread, state) : null;
     el.style.display = g ? '' : 'none';
     if (g) el.style.transform = threadTransform(g);
     el.style.opacity = thread.opacity;
+    el.dataset.from = thread.from; // the thread's identity, for eye/debug (no CSS keys off it)
+    el.dataset.to = thread.to ?? `@${thread.toStack ?? ''}`;
     return g;
+  }
+
+  // A thread is two card edges, and both are in motion during a flip, a pile
+  // opening, or a night's rearrangement. So while anything travels the strings
+  // are recomputed frame by frame from the cards' live boxes — staying fixed to
+  // both edges the whole way — then settled to the model's geometry (the truth
+  // underneath). This is the one place the view runs its own frame loop rather
+  // than handing motion to the compositor: a thread's shape is a function of two
+  // other moving things, which a keyframe cannot know. It reads only the boxes
+  // already being animated, and only the strings that show.
+  let threadRAF = 0;
+  let threadDeadline = 0;
+  function trackThreadsFrame(old = null) {
+    const fr = field.getBoundingClientRect();
+    const byKey = new Map(lastState.threads.map((t) => [threadKey(t), t]));
+    for (const [key, el] of threadEls) {
+      if (el.style.display === 'none') continue;
+      const t = byKey.get(key);
+      const g = t ? threadGeom(t, lastState, fr, old) : null;
+      if (g) el.style.transform = threadTransform(g);
+    }
+  }
+  // the boxes a move began at, in the field's own frame, for the first tracked
+  // frame — so the strings open the move from where the cards are, not from where
+  // they will land (the snap-ahead the old parallel animation was fighting)
+  function boxesInField(before) {
+    if (!before) return null;
+    const fr = field.getBoundingClientRect();
+    const m = new Map();
+    for (const [id, r] of before) {
+      const cx = r.left - fr.left + r.width / 2;
+      const cy = r.top - fr.top + r.height / 2;
+      m.set(id, { x1: cx - r.width / 2, y1: cy - r.height / 2, x2: cx + r.width / 2, y2: cy + r.height / 2, cx, cy });
+    }
+    return m;
+  }
+  function trackThreads(ms, before = null) {
+    threadDeadline = Math.max(threadDeadline, performance.now() + ms);
+    if (threadRAF) return;
+    trackThreadsFrame(boxesInField(before)); // first frame from where the cards were, so nothing jumps ahead
+    const step = () => {
+      trackThreadsFrame(); // live thereafter, following the compositor
+      if (performance.now() < threadDeadline) threadRAF = requestAnimationFrame(step);
+      else { threadRAF = 0; relayThreads(); } // the move is done: settle to the model
+    };
+    threadRAF = requestAnimationFrame(step);
+  }
+  function stopTracking() {
+    if (threadRAF) cancelAnimationFrame(threadRAF);
+    threadRAF = 0;
+    threadDeadline = 0;
   }
 
   // ---- reconcile ----
@@ -518,7 +683,7 @@ export function createView(field, { rig = false } = {}) {
     const gone = new Set(cardEls.keys());
     for (const c of state.cards) gone.delete(c.id);
     // a retired card leaves the hand too, before its element is taken away
-    for (const id of gone) if (id === flippedId) { flippedId = null; stopExperience(id); }
+    for (const id of gone) if (id === flippedId) { flippedId = null; stopExperience(id); syncModel(); }
     keepInStep(
       state.cards.map((c) => [c.id, c]),
       cardEls,
@@ -544,15 +709,58 @@ export function createView(field, { rig = false } = {}) {
         return el;
       },
       (el, studio) => {
-        el.style.left = `${(studio.place[0] * 100).toFixed(2)}%`;
-        el.style.top = `${(studio.place[1] * 100).toFixed(2)}%`;
+        // an open pile blooms around its name (D192): reveal it where it stands,
+        // shown through the gap the cards leave at the centre — and riding the same
+        // shift the bloom took to stay in the light, so the gap still finds it
+        const open = studio.name === openPile;
+        el.style.left = `${(studio.place[0] * 100 + (open ? openBloomShift.dx / rect.w * 100 : 0)).toFixed(2)}%`;
+        el.style.top = `${(studio.place[1] * 100 + (open ? openBloomShift.dy / rect.h * 100 : 0)).toFixed(2)}%`;
         el.dataset.held = String(studio.held);
+        el.toggleAttribute('data-open', open);
       },
       marks,
     );
   }
 
+  // The name at each thread's far end while a stack is read: the collaborators
+  // its works reach out to, set at their studios so a thread never lands on a
+  // pile you cannot name (D183). Quest→work threads end on cards in the spread,
+  // which carry their own byline, so only the studio ends are named here.
+  function reconcileEndNames(state) {
+    const placeOf = (name) => state.places?.[name] ?? state.studios?.find((s) => s.name === name)?.place;
+    const want = [];
+    // The open studio's own name, big at its place: the pile mark that named the
+    // wood is hidden the moment it holds a card (studios show only where empty),
+    // so an opened stack would otherwise say nowhere whose it is. Named here in
+    // the same amber as its collaborators, so selecting a pile shows who it belongs to.
+    if (openPile && !openPile.startsWith('~')) {
+      const place = placeOf(openPile);
+      if (place) want.push([openPile, { name: openPile, place }]);
+    }
+    if (openPile) {
+      for (const name of collabStudios) {
+        const place = placeOf(name);
+        if (place) want.push([name, { name, place }]);
+      }
+    }
+    keepInStep(
+      want,
+      nameEls,
+      () => { const el = document.createElement('div'); el.className = 'endname'; return el; },
+      (el, item) => {
+        el.textContent = `@${item.name}`;
+        // the open studio's own name rides the bloom's shift so it stays in the
+        // gap; the collaborators' names sit at their own places, untouched
+        const open = item.name === openPile;
+        el.style.left = `${(item.place[0] * 100 + (open ? openBloomShift.dx / rect.w * 100 : 0)).toFixed(2)}%`;
+        el.style.top = `${(item.place[1] * 100 + (open ? openBloomShift.dy / rect.h * 100 : 0)).toFixed(2)}%`;
+      },
+      nameLayer,
+    );
+  }
+
   function reconcileThreads(state) {
+    refreshLitThreads(); // which stack's story is on show decides which threads draw
     keepInStep(
       state.threads.map((t) => [threadKey(t), t]),
       threadEls,
@@ -569,9 +777,11 @@ export function createView(field, { rig = false } = {}) {
   function reconcile(state) {
     if (!instant && boxesBefore === null && placesMoved(lastState, state)) watchMoves();
     const moving = boxesBefore !== null;
+    refreshCollab(); // before the cards, so each knows whether its stack is a collaborator's
     reconcileCards(state);
     reconcileStudios(state); // after the cards: a mark is read only where its pile is empty
-    reconcileThreads(state); // and last, since a thread is measured off both
+    reconcileEndNames(state); // before the threads: a thread lands ON the collaborator's @name pill (D185), so it must exist first
+    reconcileThreads(state); // last, measured off the cards, studios and names it reaches
     // While something is being read, the rest of the table steps back a little.
     // Brightness, never opacity — opacity is how the table says age (D14), and
     // two meanings on one channel is how a legend gets invented.
@@ -617,6 +827,7 @@ export function createView(field, { rig = false } = {}) {
     }
     for (const a of active) a.cancel();
     active.clear();
+    stopTracking(); // the thread loop rides these animations; the following reconcile settles the strings
   }
 
   const finishActive = () => settleActive('finish');
@@ -684,6 +895,7 @@ export function createView(field, { rig = false } = {}) {
       return;
     }
     if (!open) stopExperience(id); // a card laid down goes quiet
+    const wasBox = el.getBoundingClientRect(); // where it lies before the turn grows it, for the strings' first frame
     const pivot = el.querySelector('.card__pivot');
     const wasOpen = flippedId === id;
     // the poses are read after settleCard has resized the element, so each is
@@ -698,6 +910,7 @@ export function createView(field, { rig = false } = {}) {
     const z = lastState.cards.findIndex((c) => c.id === id) + 1;
     settleCard(el, card, z); // truth first; the turn is an overlay
     relayThreads(); // and the card in hand is the one whose threads speak
+    syncModel(); // a model coming into the hand starts turning; one laid down stops (D190)
     if (!open) el.style.zIndex = 400; // stay lifted while turning back down
     const toPose = open ? flippedTransform(card, el, 'read') : laidKeyframe(card, 'laid');
     const anims = [
@@ -712,6 +925,7 @@ export function createView(field, { rig = false } = {}) {
         { duration: FLIP_MS, easing: EASE },
       )));
     }
+    trackThreads(FLIP_MS + SETTLE_GRACE_MS, new Map([[id, wasBox]])); // the strings follow the card as it is lifted or laid, not snap to its rest
     await Promise.race([
       Promise.allSettled(anims.map((a) => a.finished.catch(() => {}))),
       sleep(FLIP_MS + SETTLE_GRACE_MS),
@@ -804,6 +1018,23 @@ export function createView(field, { rig = false } = {}) {
     } else media.pause();
   }
 
+  // The 3D lives only in the card that is open (D190): one WebGL context at a
+  // time, mounted when a model card comes into the hand and disposed when it
+  // lies back down — a pile of model cards keeps none of them live. The still
+  // surfaces never call this, so a screenshot shows the poster, deterministic.
+  let modelHandle = null;
+  let modelFor = null; // the [data-model] element the live context belongs to
+  function syncModel() {
+    const want = flippedId != null
+      ? (cardEls.get(flippedId)?.querySelector('.card__back [data-model]') ?? null)
+      : null;
+    if (want === modelFor) return;
+    modelHandle?.dispose();
+    modelHandle = null;
+    modelFor = want;
+    if (want) modelHandle = mountModel(want, want.dataset.model);
+  }
+
   // the players of a card just built: painted once, and repainted as they run
   function wirePlayers(el) {
     for (const wrap of el.querySelectorAll('[data-plays]')) {
@@ -883,6 +1114,7 @@ export function createView(field, { rig = false } = {}) {
       const was = cardEls.get(flippedId);
       if (was) closeBack(was); // give the grown height back before the pack measures
       flippedId = null;
+      syncModel(); // and a turning model stops with it (D190)
     }
     reconcile(lastState);
     return next != null;
@@ -892,6 +1124,7 @@ export function createView(field, { rig = false } = {}) {
   const inHand = () => flippedId;
 
   function relayThreads() {
+    refreshLitThreads();
     const byKey = new Map(lastState.threads.map((t) => [threadKey(t), t]));
     for (const [key, el] of threadEls) {
       const t = byKey.get(key);

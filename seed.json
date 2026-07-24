@@ -154,7 +154,7 @@
         "detail": {
           "experience": {
             "mode": "play",
-            "src": "assets/Test.m4a"
+            "src": "assets/audio-drone.m4a"
           }
         }
       }
@@ -350,7 +350,7 @@
         "detail": {
           "experience": {
             "mode": "play",
-            "src": "assets/Test.m4a"
+            "src": "assets/audio-piece.m4a"
           }
         }
       }

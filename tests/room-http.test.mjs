@@ -355,6 +355,99 @@ test('the log is served uncached, and is empty rather than missing before the fi
   }
 });
 
+test('the hand door lays a follow-up: the card, then a thread to the one it builds on', { skip: !HAS_SDK && 'mcp/npm install has not run' }, async () => {
+  const d = await open();
+  try {
+    // E. lays one card of their own...
+    const first = handCard();
+    delete first.artifact.people; // signed E. by the token
+    const id1 = (await (await d.deposit(first)).json()).laid;
+
+    // ...then another that builds on it
+    const second = handCard();
+    delete second.artifact.people;
+    second.artifact.title = 'the fold, closed again';
+    second.buildsOn = id1;
+    const res = await d.deposit(second);
+    assert.equal(res.status, 200);
+    const id2 = (await res.json()).laid;
+
+    const threads = lines(d.root).map((l) => JSON.parse(l)).filter((e) => e.e === 'thread');
+    assert.equal(threads.length, 1, 'one follow-up, one thread');
+    assert.deepEqual(
+      { from: threads[0].from, to: threads[0].to, why: threads[0].why },
+      { from: id1, to: id2, why: 'builds on' },
+    );
+  } finally {
+    await d.close();
+  }
+});
+
+test('the MCP door takes builds_on and lays the follow-up as a thread', { skip: !HAS_SDK && 'mcp/npm install has not run' }, async () => {
+  const d = await open();
+  try {
+    await rpc(d.base, TOKEN, INIT);
+    const lay = (id, title, extra = {}) => rpc(d.base, TOKEN, {
+      jsonrpc: '2.0', id, method: 'tools/call',
+      params: { name: 'deposit', arguments: { media: 'note', kind: 'work', title, excerpt: { text: title }, ...extra } },
+    });
+    assert.match((await lay(2, 'first')).body.result.content[0].text, /^m-001 · laid/);
+    assert.match((await lay(3, 'second', { builds_on: 'm-001' })).body.result.content[0].text, /^m-002 · laid/);
+
+    const threads = lines(d.root).map((l) => JSON.parse(l)).filter((e) => e.e === 'thread');
+    assert.deepEqual(threads.map((t) => [t.from, t.to, t.why]), [['m-001', 'm-002', 'builds on']]);
+  } finally {
+    await d.close();
+  }
+});
+
+test('builds_on someone else’s card is refused over MCP, and nothing lands', { skip: !HAS_SDK && 'mcp/npm install has not run' }, async () => {
+  const d = await open();
+  try {
+    await rpc(d.base, TOKEN, INIT);
+    // a-001 is R.'s; the token is E.'s
+    const res = await rpc(d.base, TOKEN, {
+      jsonrpc: '2.0', id: 2, method: 'tools/call',
+      params: { name: 'deposit', arguments: { media: 'note', kind: 'work', title: 'mine now', excerpt: { text: 'x' }, builds_on: 'a-001' } },
+    });
+    assert.equal(res.body.result.isError, true);
+    assert.match(res.body.result.content[0].text, /not yours to build on/);
+    assert.equal(lines(d.root).length, 0, 'no card, no thread');
+  } finally {
+    await d.close();
+  }
+});
+
+test('GET /mine is the token-holder’s own cards, and no one else’s', { skip: !HAS_SDK && 'mcp/npm install has not run' }, async () => {
+  const d = await open();
+  const mine = (token) => fetch(`${d.base}/mine`, { headers: { 'x-desk-token': token } });
+  try {
+    // before E. lays anything, the seed's card belongs to R. — not to E.
+    const empty = await (await mine(TOKEN)).json();
+    assert.equal(empty.name, 'E.');
+    assert.deepEqual(empty.cards, [], 'R.’s seeded quest is not E.’s to build on');
+
+    // E. lays one, and it is exactly what the picker will draw — the card's face
+    const card = handCard();
+    delete card.artifact.people; // signed E.
+    card.artifact.title = 'the fold, closed';
+    const laid = (await (await d.deposit(card)).json()).laid;
+    const cards = (await (await mine(TOKEN)).json()).cards;
+    assert.equal(cards.length, 1);
+    assert.equal(cards[0].id, laid);
+    assert.equal(cards[0].title, 'the fold, closed');
+    assert.equal(cards[0].media, 'image', 'the media the face draws from');
+    assert.deepEqual(cards[0].people, ['E.'], 'signed by the token');
+    assert.ok(cards[0].excerpt?.src, 'the trace the face needs');
+    assert.equal(cards[0].detail, undefined, 'the back stays home — the picker shows the front (D163)');
+
+    // and a device the desk does not know is offered nothing
+    assert.equal((await mine('made-up')).status, 403);
+  } finally {
+    await d.close();
+  }
+});
+
 test('two doors, one log: the ids do not collide and the writes do not interleave', { skip: !HAS_SDK && 'mcp/npm install has not run' }, async () => {
   const d = await open();
   try {

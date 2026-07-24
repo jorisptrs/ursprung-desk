@@ -20,6 +20,18 @@ const params = new URLSearchParams(location.search);
 const field = document.getElementById('field');
 const stream = createStream();
 
+// The table is a thing to look at, not a document to scroll (§4): at the resting
+// zoom a two-finger scroll or a swipe does nothing — no rubber-band, no
+// back-gesture, no drift. Only once you have pinched INTO the map does scrolling
+// mean something — panning the zoom — and there the browser is left alone. The
+// two things that genuinely scroll keep their wheel: the deposit sheet, and a
+// card in hand paging its back (D102).
+addEventListener('wheel', (event) => {
+  if ((window.visualViewport?.scale ?? 1) > 1.01) return; // pinched in: let it pan the zoom
+  if (event.target instanceof Element && event.target.closest('.sheet, .card__back[data-pages]')) return;
+  event.preventDefault();
+}, { passive: false });
+
 async function loadEvents() {
   // ?specimens: dev-only palette surface (D44) — every media, kind, and fallback. Never linked.
   if (params.has('specimens')) {
@@ -32,7 +44,12 @@ async function loadEvents() {
     const { castleEvents } = await import('./js/castle.js');
     return castleEvents;
   }
-  const res = await fetch('seed.json');
+  // ?seed=<name>.json plays an alternate seed — a demo set, the October mocks —
+  // without touching seed.json, which the tests fixture on. Name only: no path,
+  // no protocol, so a link can never point the table at someone else's file.
+  const named = params.get('seed');
+  const file = /^[\w.-]+\.json$/.test(named ?? '') ? named : 'seed.json';
+  const res = await fetch(file);
   return (await res.json()).events;
 }
 
@@ -45,6 +62,7 @@ async function main() {
   for (const ev of tailCount ? loaded.slice(0, loaded.length - tailCount) : loaded) stream.append(ev);
 
   const rig = params.has('rig');
+  const live = params.has('live');
   const view = createView(field, { rig });
   const events = () => stream.all();
   const S = (k) => fold(events(), k === 0 ? 0 : eventTime(k - 1));
@@ -67,7 +85,10 @@ async function main() {
     settleFlip();
     return;
   }
-  const tl = createTimeline({ after: rig ? 'held' : 'live' });
+  // A table watching the drop file rests live, so a deposit lands the moment it
+  // is made — the room's whole point. Only a rig that is NOT watching (the
+  // shoot) rests held, where → deals arrivals on cue (keeper's ruling 2026-07-23).
+  const tl = createTimeline({ after: rig && !live ? 'held' : 'live' });
   if (params.has('debug')) { // the clock's whole life, alongside D59's canary
     const raw = tl.dispatch;
     tl.dispatch = (action, n) => {
@@ -134,7 +155,7 @@ async function main() {
   // flag alone, so ?rig&live and a later ?film compose without a branch here.
   // While the table is held a picked-up card simply waits: 'appended' rests
   // silent there, and the next → or d shows it.
-  if (params.has('live')) attachLivePickup(stream);
+  if (live) attachLivePickup(stream);
 
   // The held-back tail (D111): m lands what ?tail kept off the table. The
   // append alone drains in live; held, the release steps once per event, since
@@ -195,6 +216,7 @@ async function main() {
       view.workPlayer(event.target);
       return;
     }
+    if (event.target.closest('[data-model]')) return; // taking hold of the model to turn it is not putting the card down (D190)
     const pageEl = event.target.closest('[data-page]'); // turning a leaf is not putting the card down (D100)
     if (pageEl) {
       view.pageBack(cardEl.dataset.id, pageEl.dataset.page);
@@ -212,14 +234,21 @@ async function main() {
 
   // The scrub (D78): press = one card; held, our own timer rushes through the
   // stream — never the OS key-repeat, which can be slow or off entirely.
+  // A tap is exactly one card; the rush begins only on a deliberate hold, past
+  // HOLD_MS. Without the delay a normal keypress (~120 ms) outlasts the 70 ms
+  // interval and deals two or three from one press — the fast-forward-on-a-tap bug.
+  const HOLD_MS = 300;
   let scrub = null;
   const startScrub = (action) => {
     stopScrub();
-    tl.dispatch(action, events().length);
-    scrub = { action, timer: setInterval(() => tl.dispatch(action, events().length), 70) };
+    const step = () => tl.dispatch(action, events().length);
+    step(); // the press itself
+    const s = { timer: setTimeout(() => { s.timer = setInterval(step, 70); }, HOLD_MS) };
+    scrub = s;
   };
   const stopScrub = () => {
     if (!scrub) return;
+    clearTimeout(scrub.timer);
     clearInterval(scrub.timer);
     scrub = null;
   };
@@ -259,9 +288,24 @@ async function main() {
   });
 
   if (rig) {
-    document.documentElement.classList.add('rig'); // cursor: none — no arrow on the wood
+    const root = document.documentElement;
+    root.classList.add('rig'); // no + on the wood
+    // The arrow is hidden while the mouse is still — nothing screen-like resting
+    // on the projection — but a presenter driving this on a screen can move to
+    // summon it, and it fades again two seconds after they stop (D179).
+    root.classList.add('rig--still');
+    let stillTimer = null;
+    addEventListener('mousemove', () => {
+      root.classList.remove('rig--still');
+      clearTimeout(stillTimer);
+      stillTimer = setTimeout(() => root.classList.add('rig--still'), 2000);
+    });
     attachDriver((intent) => tl.dispatch(intent, events().length));
-    view.renderInstant(S(0)); // held and empty; the operator steps from here
+    // ?rig&live is the room: deal the opening pass and rest live (D178), so a
+    // deposit lands on its own without anyone pressing →. ?rig alone is the
+    // shoot: held and empty, dealt on cue. The driver keys still conduct either way.
+    if (live) tl.dispatch('boot-pass', events().length);
+    else view.renderInstant(S(0));
     settleFlip();
     return;
   }

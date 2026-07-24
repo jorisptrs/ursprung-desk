@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">
+  <g stroke="#4a4034" stroke-width="0.9" fill="none" opacity="0.9">
+    <path d="M200 40
+             C 300 60, 340 140, 300 210
+             C 260 280, 150 290, 100 230
+             C 50 170, 80 80, 170 60
+             C 260 40, 320 120, 280 190
+             C 240 260, 140 260, 108 196
+             C 76 132, 118 84, 190 82
+             C 262 80, 300 140, 268 196
+             C 236 252, 156 244, 132 192"/>
+    <path d="M60 150 H340" stroke-dasharray="2 6" opacity="0.4"/>
+    <path d="M200 30 V270" stroke-dasharray="2 6" opacity="0.4"/>
+  </g>
+</svg>

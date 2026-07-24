@@ -340,7 +340,7 @@ export const hasTitleLine = (docText) => String(docText ?? '').split('\n').some(
 // edit — delete the name, or add others beside it — rather than a silence
 // nobody notices. Where the desk cannot say who is holding the sheet (the
 // published renderer has no room to ask) the page opens blank, as it always did.
-export const signedPage = (me) => (isFilled(me) ? `\n\n@${String(me).trim()}` : '');
+export const signedPage = (me) => (isFilled(me) ? `\n@${String(me).trim()}` : '');
 
 // The signature alone is not a card. Everything else about "has anything been
 // brought yet" stays where it was — this only stops an untouched page from
@@ -593,10 +593,16 @@ const CHANNEL = 'desk:hand';
 
 export function directSink(stream) {
   return {
-    deposit(artifact, blobs = {}) {
+    deposit(artifact, blobs = {}, opts = {}) {
       const finished = materialize(artifact, blobs);
       const { id, night } = allocate(stream.all());
       stream.append({ e: 'deposit', night, artifact: { ...finished, id } });
+      // A follow-up is a thread the maker laid, appended once its card exists so
+      // the stream never sees a forward reference. The picker only ever offers
+      // ids from this same stream, so both ends are here to be found.
+      if (isFilled(opts.buildsOn)) {
+        stream.append({ e: 'thread', night, from: opts.buildsOn, to: id, why: 'builds on' });
+      }
     },
   };
 }
@@ -608,7 +614,7 @@ export function broadcastSink() {
   const channel = new BroadcastChannel(CHANNEL);
   let seq = 0;
   return {
-    deposit(artifact, blobs = {}) {
+    deposit(artifact, blobs = {}, opts = {}) {
       const probe = validateArtifact(materialize(artifact, blobs, () => 'blob:probe'));
       if (probe) return Promise.reject(new Error(probe));
       const mid = `${Date.now()}-${(seq += 1)}`;
@@ -621,7 +627,7 @@ export function broadcastSink() {
           else if (e.data.kind === 'refused') done(reject, new Error(e.data.reason));
         };
         channel.addEventListener('message', onMsg);
-        channel.postMessage({ kind: 'deposit', mid, artifact, blobs });
+        channel.postMessage({ kind: 'deposit', mid, artifact, blobs, buildsOn: opts.buildsOn });
       });
     },
   };
@@ -639,7 +645,7 @@ export function httpSink(base, token, { fetch: fetchImpl = null } = {}) {
     // the room's table is the projected one, so a push says what actually
     // happened rather than the same-browser line the broadcast door says
     says: 'pushed · the table has it',
-    async deposit(artifact, blobs = {}) {
+    async deposit(artifact, blobs = {}, opts = {}) {
       // Refused here first, in the stream's own words, so a card that cannot
       // stand never becomes an upload.
       const probe = validateArtifact(materialize(artifact, blobs, () => 'blob:probe'));
@@ -651,15 +657,27 @@ export function httpSink(base, token, { fetch: fetchImpl = null } = {}) {
         const url = await readDataUrl(blob);
         packed[key] = { name: blob.name ?? '', type: blob.type ?? '', b64: url.slice(url.indexOf(',') + 1) };
       }
+      // A phone off the wifi must fail in words, not hang on a dead socket: the
+      // OS often leaves such a fetch pending for a minute rather than refusing
+      // it, so the push button would just sit dark with nothing said.
+      // navigator.onLine settles the certain case at once; a timeout bounds the
+      // rest — a real LAN deposit, a photo included, is a second or two.
+      const offline = () => new Error('the desk is not answering — the room may be off the network');
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) throw offline();
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
       let res;
       try {
         res = await get(`${base}/deposit`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'x-desk-token': token },
-          body: JSON.stringify({ artifact, blobs: packed }),
+          body: JSON.stringify({ artifact, blobs: packed, buildsOn: opts.buildsOn }),
+          signal: controller.signal,
         });
       } catch {
-        throw new Error('the desk is not answering — the room may be off the network');
+        throw offline();
+      } finally {
+        clearTimeout(timer);
       }
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.refused ?? `the desk did not take it (${res.status})`);
@@ -674,7 +692,7 @@ export function attachBroadcastReceiver(stream) {
   channel.addEventListener('message', (e) => {
     if (e.data?.kind !== 'deposit') return;
     try {
-      directSink(stream).deposit(e.data.artifact, e.data.blobs ?? {});
+      directSink(stream).deposit(e.data.artifact, e.data.blobs ?? {}, { buildsOn: e.data.buildsOn });
       channel.postMessage({ kind: 'laid', mid: e.data.mid });
     } catch (err) {
       channel.postMessage({ kind: 'refused', mid: e.data.mid, reason: String(err?.message ?? err) });
@@ -835,17 +853,46 @@ export const warmEditor = () => { editorModule ??= import('./editor.js'); return
 //
 // Deliberately spare: the desk does not instruct, and a column of the names of
 // people you are living with, one of them yours, explains itself.
-export function claimGate({ container = document.body, people = [], onClaim }) {
+// The name page (keeper's ruling): one page, both doors. A device the room does
+// not know meets the cohort and taps its own name. A device that is already
+// someone reaches the same page from the sheet, and there it may be called
+// something new (rename, keeping its token) OR become someone else (claim another
+// name). It resolves { token, name } either way, and the sheet opens as whoever
+// came back.
+export function claimGate({ container = document.body, people = [], onClaim, me = null, onRename = null, token = null }) {
   return new Promise((resolve) => {
     const gate = h('section', 'sheet sheet--page sheet--gate');
     const panel = h('div', 'sheet__panel');
     const head = h('div', 'sheet__head');
     head.append(h('div', 'sheet__heading', 'the desk'));
-    panel.append(head, h('div', 'sheet__label', 'your name'));
-
-    const list = h('div', 'gate__names');
+    panel.append(head);
     const status = h('div', 'sheet__status');
     let busy = false;
+
+    // Renaming yourself: the name you already answer to, changed for what comes
+    // next — cards already laid keep the name they wore, the log is not rewritten.
+    if (me && onRename) {
+      const row = h('div', 'gate__you');
+      row.append(h('span', 'sheet__label', 'you are'));
+      const field = h('input', 'sheet__field gate__rename');
+      field.value = me;
+      field.setAttribute('aria-label', 'your name');
+      const save = h('span', 'sheet__action', 'rename');
+      const commit = async () => {
+        const wanted = field.value.trim();
+        if (busy || !wanted || wanted === me) return;
+        busy = true;
+        try { const nm = await onRename(wanted); gate.remove(); resolve({ token, name: nm }); }
+        catch (err) { busy = false; status.textContent = String(err?.message ?? err); }
+      };
+      save.addEventListener('click', commit);
+      field.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } });
+      row.append(field, save);
+      panel.append(row);
+    }
+
+    panel.append(h('div', 'sheet__label', me ? 'or someone else' : 'your name'));
+    const list = h('div', 'gate__names');
     for (const name of people) {
       const opt = h('span', 'sheet__opt gate__name', name);
       opt.addEventListener('click', async () => {
@@ -864,6 +911,13 @@ export function claimGate({ container = document.body, people = [], onClaim }) {
     }
     if (!people.length) status.textContent = 'this room has no cohort yet';
     panel.append(list, status);
+
+    // A way back to the desk without changing anything — as whoever you already are.
+    if (me) {
+      const back = h('span', 'sheet__action gate__back', 'back to the desk');
+      back.addEventListener('click', () => { if (busy) return; gate.remove(); resolve({ token, name: me }); });
+      panel.append(back);
+    }
     gate.append(panel);
     container.append(gate);
   });
@@ -871,7 +925,7 @@ export function claimGate({ container = document.body, people = [], onClaim }) {
 
 export function openSheet({
   mode = 'overlay', container = document.body, sink, prefill = null, tray = null, autofocus = true,
-  me = null, people = [], onRename = null,
+  me = null, people = [], onSwitchName = null, myCards = null,
 } = {}) {
   tray = tray ?? createTray(createBrowserBackend());
 
@@ -884,6 +938,7 @@ export function openSheet({
     editingId: null,
     previewUrls: [],
     unknownRefs: [],
+    buildsOn: null, // { id, label } — an optional follow-up to one of the maker's own cards
   };
   let ed = null; // the CodeMirror handle, once mounted
 
@@ -892,72 +947,150 @@ export function openSheet({
   sheet.append(panel);
 
   const head = h('div', 'sheet__head');
-  head.append(h('div', 'sheet__heading', 'add your work'));
-  // Whose sheet this is, and a way to be called something else. A rename binds
-  // what comes after: cards already laid keep the name they were laid under,
-  // because the log is never rewritten.
-  if (me && onRename) {
-    const who = h('span', 'sheet__who', me);
-    who.title = 'change your name';
-    who.addEventListener('click', () => {
-      const field = h('input', 'sheet__field sheet__who-field');
-      field.value = me;
-      const commit = async () => {
-        const wanted = field.value.trim();
-        field.replaceWith(who);
-        if (!wanted || wanted === me) return;
-        try {
-          me = await onRename(wanted);
-          who.textContent = me;
-          state.docText = signedPage(me);
-          if (ed) ed.setText(state.docText, { caretAt: 0 });
-          refreshPreviews();
-          say('');
-        } catch (err) {
-          say(String(err?.message ?? err));
-        }
-      };
-      field.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); commit(); }
-        if (e.key === 'Escape') { e.preventDefault(); field.replaceWith(who); }
-      });
-      field.addEventListener('blur', commit);
-      who.replaceWith(field);
-      field.focus();
-      field.select();
-    });
-    head.append(who);
-  }
-  if (mode === 'overlay') {
-    const closeBtn = h('span', 'sheet__action', 'close');
-    closeBtn.addEventListener('click', () => close());
-    head.append(closeBtn);
-  }
-  panel.append(head);
-
-  // The register is its own field (D90): work · quest — and at the line's far
-  // right, the one flag there is (D98). The flag asks nothing further of
-  // anyone now: what craft a work belongs to is read from the work itself.
-  const kindRow = h('div', 'sheet__row sheet__meta');
-  kindRow.append(h('span', 'sheet__label', 'enters as'));
+  // "add a …" and the register in one breath (D90): the heading names the act,
+  // the three registers finish it — work, quest, note on Claude — one of them lit.
+  const headReg = h('div', 'sheet__heading-row');
+  headReg.append(h('span', 'sheet__heading', 'add a'));
   const kindEls = new Map();
   for (const k of ['work', 'quest']) {
     const opt = h('span', 'sheet__opt', KIND_LABELS[k]);
     opt.dataset.means = KIND_MEANS[k]; // what it is for, on hover — never printed on the table
     opt.addEventListener('click', () => { state.kind = k; syncMeta(); refreshPreviews(); });
     kindEls.set(k, opt);
-    kindRow.append(opt);
+    headReg.append(opt);
   }
-  const flag = h('span', 'sheet__opt sheet__flag', KIND_LABELS.failure);
+  // the register Claude alone may set (D98) — inline with the rest now, since the
+  // heading reads them all; a second tap on it goes back to work.
+  const flag = h('span', 'sheet__opt', KIND_LABELS.failure);
   flag.dataset.means = KIND_MEANS.failure;
   flag.addEventListener('click', () => {
     state.kind = state.kind === 'failure' ? 'work' : 'failure';
     syncMeta();
     refreshPreviews();
   });
-  kindRow.append(flag);
+  headReg.append(flag);
+  head.append(headReg);
+
+  const tools = h('div', 'sheet__tools'); // the head's right cluster: who, and close
+  // Your name sits apart from the registers, top-right and worn as a chip — it is
+  // who this card will be signed by, not a fourth register. Tapping it is the one
+  // way to become someone else or be called something new; both live on the name
+  // page it opens (keeper's ruling). A rename there binds only what comes after.
+  if (me) {
+    const who = h('span', 'sheet__who', me);
+    if (onSwitchName) {
+      who.title = 'someone else, or a new name';
+      who.addEventListener('click', () => onSwitchName());
+    }
+    tools.append(who);
+  }
+  if (mode === 'overlay') {
+    const closeBtn = h('span', 'sheet__action', 'close');
+    closeBtn.addEventListener('click', () => close());
+    tools.append(closeBtn);
+  }
+  head.append(tools);
+  panel.append(head);
+
+
+  // An optional follow-up: this card builds on one the maker already laid, so
+  // the two read as one line of work when the studio opens (D145 — the maker
+  // says it, the desk never guesses). Own cards only in v1; the list comes from
+  // outside — the tab's own stream on the page, /mine on a phone — and the whole
+  // row stays hidden until there is at least one card of theirs to build on.
+  const buildsRow = h('div', 'sheet__row sheet__meta sheet__builds');
+  buildsRow.style.display = 'none';
+  buildsRow.style.flexWrap = 'wrap';
+  buildsRow.append(h('span', 'sheet__label', 'builds on'));
+  const buildsVal = h('span', 'sheet__opt sheet__builds-val', '…'); // the prompt, when nothing is chosen
+  const buildsChosen = h('div', 'sheet__builds-chosen'); // the chosen card, drawn as its own small face
+  buildsChosen.style.cssText = 'display:none; cursor:pointer;';
+  const buildsClear = h('span', 'sheet__discard sheet__builds-clear', '×');
+  buildsClear.title = 'not a follow-up';
+  buildsClear.style.display = 'none';
+  // The menu is the maker's own cards drawn the way they lie on the table (D163) —
+  // pick the work this one continues, not a line of text about it. Own cards only.
+  const buildsMenu = h('div', 'sheet__builds-menu');
+  buildsMenu.style.cssText = 'display:none; flex-basis:100%; width:100%; margin-top:0.7em; gap:1.1em; overflow-x:auto; padding:0.2em 0.1em 0.7em;';
+  buildsRow.append(buildsVal, buildsChosen, buildsClear, buildsMenu);
+
+  // one renderer for both the menu and the chosen face — the same card the table
+  // draws (front only; the picker never turns a card), sized down for the sheet.
+  const cardFace = (artifact, px) => {
+    const el = renderCard({ ...artifact });
+    el.classList.add('sheet__card');
+    el.style.width = `${px}px`;
+    el.style.fontSize = `${(px * 0.075).toFixed(2)}px`; // D66: font is width × 0.075
+    el.style.pointerEvents = 'none'; // the slot takes the tap; the face is a picture, as the deck's are
+    return el;
+  };
+  const labelOf = (a) => {
+    const t = [a.title, a.caption, a.excerpt?.text].map((v) => (typeof v === 'string' ? v.trim() : '')).find(Boolean);
+    return t || a.id;
+  };
+
+  const renderBuilds = () => {
+    const picked = state.buildsOn;
+    buildsVal.style.display = picked ? 'none' : '';
+    buildsChosen.replaceChildren();
+    if (picked?.artifact) {
+      try { buildsChosen.append(cardFace(picked.artifact, 120)); } catch { buildsChosen.append(h('span', 'sheet__opt sheet__opt--on', picked.label)); }
+    } else if (picked) {
+      buildsChosen.append(h('span', 'sheet__opt sheet__opt--on', picked.label));
+    }
+    buildsChosen.style.display = picked ? '' : 'none';
+    buildsClear.style.display = picked ? '' : 'none';
+  };
+  // Fetched fresh each open: on the page the tab's stream grows with every push,
+  // so a card laid a moment ago is there to build the next one on.
+  const openBuildsMenu = async () => {
+    let cards = [];
+    try { cards = (await Promise.resolve(myCards ? myCards() : [])) ?? []; } catch { cards = []; }
+    cards = cards.filter((c) => c && c.id && c.id !== state.editingId); // never build a card on itself
+    buildsMenu.replaceChildren();
+    if (!cards.length) {
+      const none = h('span', 'sheet__builds-none', 'nothing of yours yet');
+      none.style.opacity = '0.6';
+      buildsMenu.append(none);
+    } else {
+      for (const a of cards) {
+        const slot = h('div', 'sheet__builds-opt');
+        slot.style.cssText = 'flex:0 0 auto; cursor:pointer;';
+        slot.title = labelOf(a);
+        try { slot.append(cardFace(a, 160)); } catch { slot.append(h('div', 'card')); }
+        slot.addEventListener('click', () => {
+          state.buildsOn = { id: a.id, label: labelOf(a), artifact: a };
+          buildsMenu.style.display = 'none';
+          renderBuilds();
+        });
+        buildsMenu.append(slot);
+      }
+    }
+    buildsMenu.style.display = 'flex';
+  };
+  const toggleMenu = () => { if (buildsMenu.style.display === 'none') openBuildsMenu(); else buildsMenu.style.display = 'none'; };
+  buildsVal.addEventListener('click', toggleMenu);
+  buildsChosen.addEventListener('click', toggleMenu); // tap the chosen card to change it
+  buildsClear.addEventListener('click', () => { state.buildsOn = null; buildsMenu.style.display = 'none'; renderBuilds(); });
+  // Reveal the row only when the maker has something to build on; re-checked
+  // after every push (clearForm), since a first card makes a second a follow-up.
+  const refreshBuilds = () => {
+    renderBuilds();
+    buildsMenu.style.display = 'none';
+    Promise.resolve(myCards ? myCards() : [])
+      .then((cards) => { buildsRow.style.display = (Array.isArray(cards) && cards.length) ? '' : 'none'; })
+      .catch(() => { buildsRow.style.display = 'none'; });
+  };
+
+  const editorWrap = h('div', 'sheet__editorwrap');
   const editorBox = h('div', 'editor');
-  panel.append(kindRow, editorBox);
+  // The × rides the corner of the card you are writing (keeper's ruling): it bins
+  // THIS card, plainly — so it sits on the page, not up in the head with the chrome.
+  const cardX = h('span', 'sheet__cardx', '×');
+  cardX.title = 'discard this card';
+  cardX.addEventListener('click', () => { clearForm(); say(''); });
+  editorWrap.append(editorBox, cardX);
+  panel.append(buildsRow, editorWrap);
 
   const previews = h('div', 'sheet__previews');
   const frontBox = h('figure', 'sheet__face');
@@ -1234,9 +1367,11 @@ export function openSheet({
     state.linkMeta.clear();
     state.frontPieceId = null;
     state.editingId = null;
+    state.buildsOn = null; // a follow-up is declared per card; the next card starts unlinked
     if (ed) ed.setText(state.docText, { caretAt: 0 }); // the pen waits above the signature
     syncMeta();
     refreshPreviews();
+    refreshBuilds();
   }
 
   function loadEntry(entry) {
@@ -1366,7 +1501,7 @@ export function openSheet({
     if (probe) { say(probe); return; }
     push.classList.add('sheet__push--busy');
     try {
-      await sink.deposit(artifact, blobs);
+      await sink.deposit(artifact, blobs, { buildsOn: state.buildsOn?.id });
       if (state.editingId) await tray.unstage(state.editingId);
       clearForm();
       await refreshDeck();
@@ -1376,7 +1511,7 @@ export function openSheet({
       const m = String(err?.message ?? err);
       if (m.includes('no table')) { // silence is not refusal — the deck keeps it (D99)
         await stash({ quiet: true });
-        say('no table is open in this browser · kept in the deck');
+        say("can't reach the table · kept in the deck"); // terse, but say the card is safe (D99)
       } else {
         say(m);
       }
@@ -1428,6 +1563,7 @@ export function openSheet({
   syncMeta();
   refreshPreviews();
   refreshDeck();
+  refreshBuilds();
   if (prefill?.file) intakeFiles([prefill.file]);
 
   return { el: sheet, close };

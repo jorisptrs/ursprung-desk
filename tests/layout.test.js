@@ -4,7 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { arrange, berths, packSpread } from '../js/layout.js';
+import { arrange, berths, packSpread, spreadAround } from '../js/layout.js';
 import { TABLE_ASPECT } from '../js/fold.js';
 
 const NAMES = ['R.', 'B.', 'M.', 'E.', 'Y.', 'T.', 'L.', 'A.', 'S.', 'K.', 'N.', 'P.',
@@ -179,4 +179,25 @@ test('nothing to open', () => {
   assert.deepEqual(packSpread([]), { offsets: [], w: 0, h: 0 });
   assert.deepEqual(packSpread(null), { offsets: [], w: 0, h: 0 });
   assert.deepEqual(packSpread([{ w: 0, h: 0 }]), { offsets: [], w: 0, h: 0 }, 'a card with no size is not a card');
+});
+
+test('a pile blooms around its name, leaving the centre clear for it to show (D192)', () => {
+  const hole = { w: 44, h: 22 };
+  const holeClear = (sizes, pack) => !pack.offsets.some((o, i) => {
+    const w = sizes[i].w / 2; const h = sizes[i].h / 2;
+    return o.dx - w < hole.w / 2 - 1e-9 && o.dx + w > -hole.w / 2 + 1e-9
+      && o.dy - h < hole.h / 2 - 1e-9 && o.dy + h > -hole.h / 2 + 1e-9;
+  });
+  for (const n of [2, 3, 4, 6, 8, 11]) {
+    const sizes = boxes(n);
+    const pack = spreadAround(sizes, 8, hole);
+    assert.equal(pack.offsets.length, n, `${n} cards each get a place`);
+    assert.ok(!overlaps(rects(sizes, pack)), `${n} cards: none covers another`);
+    assert.ok(holeClear(sizes, pack), `${n} cards: the name's gap at the centre stays clear`);
+  }
+  // mixed shapes still leave the gap and never overlap
+  const mixed = [{ w: 100, h: 200 }, { w: 60, h: 60 }, { w: 100, h: 90 }, { w: 140, h: 90 }, { w: 60, h: 60 }];
+  assert.ok(!overlaps(rects(mixed, spreadAround(mixed, 8, hole))), 'a tall photograph does not sit on the note beside it');
+  assert.deepEqual(spreadAround([], 8, hole), { offsets: [], w: 0, h: 0 });
+  assert.deepEqual(spreadAround(null, 8, hole), { offsets: [], w: 0, h: 0 });
 });

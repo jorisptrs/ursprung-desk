@@ -12,11 +12,15 @@ const INTENTS = {
 const SCRUBS = { s: 'step', ArrowRight: 'step', ArrowLeft: 'back' }; // held, these rush (D78); space steps nowhere (D103)
 
 export function attachDriver(dispatch) {
-  // The scrub timer is the driver's own — OS key-repeat can be slow or off.
-  let scrub = null;
+  // The scrub timer is the driver's own — OS key-repeat can be slow or off. A
+  // tap is one card; only a hold past HOLD_MS rushes. Without the delay a normal
+  // ~120 ms press outlasts the 70 ms interval and deals two or three from one tap.
+  const HOLD_MS = 300;
+  let scrub = null; // { timer } — the hold-delay timeout, then the rush interval
   const stopScrub = () => {
     if (!scrub) return;
-    clearInterval(scrub);
+    clearTimeout(scrub.timer);
+    clearInterval(scrub.timer);
     scrub = null;
   };
   addEventListener('keydown', (event) => {
@@ -26,8 +30,10 @@ export function attachDriver(dispatch) {
     if (SCRUBS[key]) {
       if (event.repeat) return;
       stopScrub();
-      dispatch(SCRUBS[key]);
-      scrub = setInterval(() => dispatch(SCRUBS[key]), 70);
+      const step = () => dispatch(SCRUBS[key]);
+      step(); // the press itself: exactly one card
+      const s = { timer: setTimeout(() => { s.timer = setInterval(step, 70); }, HOLD_MS) };
+      scrub = s;
       return;
     }
     if (event.repeat) return;

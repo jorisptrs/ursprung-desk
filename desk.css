@@ -12,11 +12,17 @@
   --ashen: #d3cfc7;         /* the failure register */
   --ashen-ink: #504d47;
   --amber: #c49a58;         /* threads, later */
+  /* the accent: the address and the thread, one colour — a clear amber that
+     reads even on parchment because the @name sits on its own dark bead (D183). */
+  --accent: #d3a860;
+  --name-ink: var(--accent);              /* the @name text */
+  --name-bead: rgba(20, 15, 9, 0.92);     /* the dark bead the amber @name sits on */
+  --thread: var(--amber);
 }
 
 * { box-sizing: border-box; }
 
-html, body { height: 100%; }
+html, body { height: 100%; overscroll-behavior: none; } /* no bounce, no pull-to-refresh on the table */
 
 body {
   margin: 0;
@@ -39,8 +45,10 @@ body {
   box-shadow: 0 0 70px 18px rgba(200, 160, 95, 0.045); /* faint spill, as a projector leaks */
 }
 
-/* the rig hides the pointer — nothing screen-like touches the wood (D64) */
-html.rig, html.rig body { cursor: none; }
+/* the rig hides the pointer while the mouse is still — nothing screen-like rests
+   on the wood (D64) — but a presenter driving it on a screen can move to summon
+   the arrow, and it fades again when they stop (D179) */
+html.rig.rig--still, html.rig.rig--still body { cursor: none; }
 
 /* ---- threads: string under paper, drawn between card edges (D51) ---- */
 
@@ -50,6 +58,13 @@ html.rig, html.rig body { cursor: none; }
   z-index: 0; /* cards start at 1 */
   pointer-events: none;
 }
+
+/* string under paper at rest (D51) — but while a stack is read its few threads
+   ride ABOVE the dimmed table (D186), or a thread to a far collaborator would run
+   the whole way behind the cards between and never be seen. Under the lit spread
+   (z 300) and the name tags (z 260) still, so it emerges from its card and lands
+   under the @name it points to. */
+[data-reading] .threads { z-index: 250; }
 
 /* The studios: a name written on the wood where a person's pile stands. Under
    the cards, so it is read only where the pile is empty — and a thread from a
@@ -64,15 +79,51 @@ html.rig, html.rig body { cursor: none; }
 .studio {
   position: absolute;
   transform: translate(-50%, -50%);
-  color: color-mix(in srgb, var(--parchment) 46%, transparent);
-  font-size: clamp(9px, 1.1cqmin, 15px);
-  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--parchment) 62%, transparent);
+  font-size: clamp(10px, 1.25cqmin, 17px);
+  letter-spacing: 0.03em;
   white-space: nowrap;
 }
 
 /* the name is the empty place itself — the first card to land on it says the
    same thing better, so the writing goes */
 .studio:not([data-held="0"]) { display: none; }
+
+/* …until the pile opens: then the name is written again where it stands, and
+   the cards bloom around it so it shows through the gap at the centre (D192).
+   It stays under the cards (z 0), read only through that gap. */
+.studio[data-open] {
+  display: block;
+  color: color-mix(in srgb, var(--parchment) 88%, transparent);
+}
+[data-reading] .studio[data-open] { filter: none; }
+
+/* the name at a thread's far end while a stack is read (D183): an amber address
+   pill set where the thread lands — on the collaborator's pile, which otherwise
+   carries no word you can read from across the room. Above the dimmed cards it
+   sits on; gone the moment the stack closes. */
+.endnames {
+  position: absolute;
+  inset: 0;
+  /* above the spread cards (300+), so the open studio's own name reads over its
+     own opened pile; below a card lifted to be flipped (400) */
+  z-index: 380;
+  pointer-events: none;
+}
+
+.endname {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-size: clamp(10px, 1.25cqmin, 17px); /* the usual on-map name size, never enlarged (D185) */
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--accent);
+  white-space: nowrap;
+  padding: 0.1em 0.45em;
+  background: var(--name-bead);
+  border-radius: 999px;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.5);
+}
 
 .thread {
   position: absolute;
@@ -81,7 +132,7 @@ html.rig, html.rig body { cursor: none; }
   width: 1px; /* scaleX carries the length — all compositor, no layout */
   height: 1.5px;
   border-radius: 1px;
-  background: rgba(196, 154, 88, 0.7); /* --amber, quiet */
+  background: color-mix(in srgb, var(--thread) 70%, transparent); /* quiet amber, or the light table's saturated line */
   transform-origin: 0 50%;
   will-change: transform, opacity;
 }
@@ -107,6 +158,10 @@ html.rig, html.rig body { cursor: none; }
 [data-reading] .card,
 [data-reading] .studio { filter: brightness(0.55); }
 
+/* A collaborator's stack is not enlarged or lit up (D185, amends D181): the
+   thread reaching it and its name set at its place — at the usual size — are
+   what mark it, so opening a studio stays about the studio you opened. */
+
 [data-reading] .card[data-lit] { filter: none; }
 
 /* a work made with somebody else, visiting this studio's timeline: it belongs
@@ -118,7 +173,26 @@ html.rig, html.rig body { cursor: none; }
     0 7px 18px rgba(0, 0, 0, 0.3);
 }
 
-[data-reading] .thread { filter: brightness(0.5); } /* not opacity — the fold sets that inline */
+/* while a stack is read, its own threads are the point, not the background: the
+   few that show reach from it to the collaborators and the works it answered, so
+   they stand thicker and in full amber (D181). And they carry a thin dark edge
+   (D187): a bare amber line all but vanishes where it crosses a pale card, since
+   amber on parchment has no contrast — the edge (a cross-line gradient, which
+   survives the scaleX the length rides on) keeps the line whole over dark table
+   and light card alike, end to end, instead of fading out the moment it meets
+   paper. */
+[data-reading] .thread {
+  height: 4px;
+  background: linear-gradient(
+    to bottom,
+    rgba(6, 4, 2, 0.62),
+    rgba(6, 4, 2, 0.62) 1px,
+    var(--accent) 1px,
+    var(--accent) 3px,
+    rgba(6, 4, 2, 0.62) 3px,
+    rgba(6, 4, 2, 0.62)
+  );
+}
 
 /* ---- the flip: the pivot turns, the card carries light and shadow (D73) ----
    opacity and shadow sit OUTSIDE the pivot — inside they'd flatten the 3D
@@ -151,7 +225,7 @@ html.rig, html.rig body { cursor: none; }
   transform: rotateY(180deg);
   background: var(--back-bg);
   border-radius: inherit;
-  padding: 0.8em 0.9em;
+  padding: 0.8em 0.9em 2em; /* the foot is reserved for the makers' tag (D185) */
   overflow: hidden; /* the back is a window; a long arrangement pages (D100) */
 }
 
@@ -248,6 +322,30 @@ html.rig, html.rig body { cursor: none; }
 
 .back__play audio { display: none; } /* the sound has no face; the bar is its face */
 
+/* a model turns where it lies (D190): a square of the parchment the WebGL fills
+   when the card opens; the render still is its poster, shown until it does and
+   wherever there is no WebGL. The canvas is transparent — the parchment behind. */
+.back__model {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  max-height: var(--piece-max, 16em);
+  touch-action: none; /* a drag here turns the model, it does not scroll the leaf */
+}
+
+.back__model-poster,
+.back__model-gl {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.back__model-poster { object-fit: contain; }
+
+.back__model-gl { cursor: grab; }
+.back__model-gl:active { cursor: grabbing; }
+
 .play__frame {
   border-radius: 3px;
   overflow: hidden;
@@ -333,15 +431,26 @@ html.rig, html.rig body { cursor: none; }
 
 /* Whose card this is. Dimmer than the caption and set apart from it: the eye
    finds the pile by it without reading it as part of the work's own words. */
+/* whose work this is — kept salient on purpose (D183): the table is a map of
+   studios, so the address is not a footnote, it is how you read the room. Set in
+   a weight above the caption and in full ink, so a glance tells you whose pile
+   this is and whom a thread landing here belongs to. */
+/* the @name wears the accent always, not only when a thread lands on it (D185):
+   an amber address on its own dark bead, so whose pile this is reads at a glance
+   and in the same colour the threads use. The bead is what lets amber sit on
+   parchment at all. */
 .card__by {
-  margin-top: 0.35em;
-  font-size: 0.6em;
-  line-height: 1.3;
-  letter-spacing: 0.03em;
-  color: color-mix(in srgb, var(--ink-muted) 82%, transparent);
+  display: inline-block;
+  margin-top: 0.45em;
+  font-size: 0.66em;
+  line-height: 1.35;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+  color: var(--name-ink);
+  background: var(--name-bead);
+  padding: 0.15em 0.5em 0.18em;
+  border-radius: 0.9em;
 }
-
-.kind--failure .card__by { color: color-mix(in srgb, var(--ashen-ink) 88%, transparent); }
 
 /* What a register is for, said on hover. Not the browser's own tooltip: that
    waits about a second before it appears, which is long enough that nobody who
@@ -456,11 +565,13 @@ html.rig, html.rig body { cursor: none; }
 .trace--sentence {
   font-size: 0.98em;
   line-height: 1.45;
+  white-space: pre-line; /* a maker's own line breaks stand — a haiku keeps its three lines; prose still wraps */
 }
 
 .trace--words {
   font-size: 1.02em;
   line-height: 1.4;
+  white-space: pre-line;
 }
 
 .trace--lines { /* code: a few real lines */
@@ -501,37 +612,35 @@ html.rig, html.rig body { cursor: none; }
   background: var(--ashen);
   color: var(--ashen-ink);
 }
-.kind--failure .kind--failure .card__front { padding-top: 2.1em; } /* the stamp keeps its own band */
 
-/* "note" printed horizontal; "Claude" stamped diagonally across it — a stamp on
-   print (D9). It sits on its own line at the head of the card rather than over
-   the work: a stamp is put on a page, not through what the page says. Set in
-   the wordmark's serif family where the machine has it; nothing is fetched (D36). */
-.failure-stamp {
-  position: relative;
+/* A register's stamp — "Quest", "Note on Claude" — pressed onto the face so it
+   stands out from the works around it (keeper's ruling): a bordered mark in the
+   register's own ink, a touch askew the way a stamp lands, on its own line at the
+   head rather than over the work (a stamp is put on a page, not through what the
+   page says). Whole and legible, never struck through the words (D191): the short
+   phrase tilts as one, so it reads where the old diagonal smudged. Set in the
+   wordmark's serif where the machine has it; nothing is fetched (D36). */
+.card-stamp {
   width: fit-content;
-  margin: 0 0 0.45em auto; /* its own line, at the right where a stamp lands */
-  padding-left: 3.95em; /* the room the diagonal word stands in, beside the other */
+  max-width: 100%;
+  margin: 0 0 0.5em auto; /* its own line, to the right where a stamp lands */
+  padding: 0.1em 0.45em;
   font-family: 'Copernicus', 'Tiempos Text', 'Iowan Old Style', Palatino, Georgia, serif;
-  font-size: 1em;
-  line-height: 1.35;
+  font-style: normal; /* upright even on a quest, whose words are set italic */
+  font-size: 0.72em;
+  font-weight: 600;
+  line-height: 1.25;
   letter-spacing: 0.05em;
-  color: rgba(58, 53, 45, 0.85);
+  color: var(--stamp-ink);
+  border: 1.5px solid color-mix(in srgb, var(--stamp-ink) 75%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--stamp-ink) 10%, transparent);
+  transform: rotate(-3deg);
+  transform-origin: right center;
   pointer-events: none;
 }
-
-.failure-stamp__who {
-  position: absolute;
-  /* it leans across the other word's first letter and no further: a stamp that
-     lands square on the print is a stamp nobody can read */
-  left: 0.1em;
-  top: -0.05em;
-  transform: rotate(-10deg);
-  font-size: 1.15em;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  color: rgba(58, 53, 45, 0.95);
-}
+.card-stamp--failure { --stamp-ink: #9c4a3c; } /* the critique register, an aged red ink */
+.card-stamp--quest { --stamp-ink: #8a6d33; } /* a question set to the room, a quiet ochre */
 
 /* ---- back composition (D88): the maker's arrangement on the sheet's
    reverse — quiet text, stills of the pieces, plain lines out ---- */
@@ -541,6 +650,53 @@ html.rig, html.rig body { cursor: none; }
   line-height: 1.45;
   color: var(--ink-muted);
   white-space: pre-wrap;
+}
+
+/* code carried onto the back keeps its own hand (D169 extended): the front's
+   lines at reading size, monospace, never demoted to the body serif */
+.back__code {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.6em;
+  line-height: 1.5;
+  color: var(--ink-muted);
+  white-space: pre;
+  overflow: hidden;
+  margin: 0;
+}
+
+/* a note's own words on its back — read in the ink they were written in, not
+   demoted to body grey, since for a note the words are the whole of the work */
+.back__words {
+  font-size: 0.82em;
+  line-height: 1.4;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
+/* who made it, on the back: the same quiet register as the face's byline (D180) */
+/* the makers, in the same amber tag the face wears, pinned to the foot of the
+   turned card (D185) — whose work this is reads the same on both sides */
+.back__by {
+  position: absolute;
+  left: 0.9em;
+  bottom: 0.7em;
+  z-index: 2;
+  font-size: 0.6em;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+  color: var(--name-ink);
+  background: var(--name-bead);
+  padding: 0.15em 0.5em 0.18em;
+  border-radius: 0.9em;
+}
+
+/* the caption's facts, quiet at the foot of the back */
+.back__cap {
+  font-size: 0.62em;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  color: var(--ink-muted);
 }
 
 .back__piece { margin: 0; max-width: 100%; }
@@ -604,24 +760,76 @@ html.rig, html.rig body { cursor: none; }
   margin-bottom: 0.2em;
 }
 
+/* the head's right cluster: whose sheet, back to the name list, discard */
+.sheet__tools {
+  display: flex;
+  gap: 0.9em;
+  align-items: baseline;
+}
+
+/* the × that bins a started-but-unpushed card, back to a fresh sheet */
+.sheet__discard {
+  cursor: pointer;
+  user-select: none;
+  font-size: 1.35em;
+  line-height: 1;
+  color: rgba(232, 220, 196, 0.45);
+}
+.sheet__discard:hover { color: rgba(232, 220, 196, 0.9); }
+
 .sheet__heading {
   font-size: 1.15em;
   letter-spacing: 0.02em;
   color: rgba(232, 220, 196, 0.9);
 }
 
-/* whose sheet this is (keeper's ruling): quiet at the head, tappable to be
-   called something else — a rename binds what comes after, never what is laid */
-.sheet__who {
-  cursor: pointer;
-  font-size: 0.9em;
-  color: rgba(232, 220, 196, 0.55);
-  border-bottom: 1.5px solid rgba(196, 154, 88, 0.25);
-  user-select: none;
+/* "add a" and the register on one line: the heading names the act, the three
+   registers finish it (work · quest · note on Claude), one of them lit */
+.sheet__heading-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.7em;
 }
 
-.sheet__who:hover { color: rgba(220, 196, 150, 0.95); }
-.sheet__who-field { max-width: 10em; }
+/* the × rides the top-right corner of the card you are writing, so it plainly
+   bins THIS card and not the sheet — dark ink, for the parchment it sits on */
+.sheet__editorwrap { position: relative; }
+.sheet__cardx {
+  position: absolute;
+  top: 0.35em;
+  right: 0.55em;
+  z-index: 4;
+  cursor: pointer;
+  user-select: none;
+  font-size: 1.3em;
+  line-height: 1;
+  color: rgba(60, 46, 24, 0.4);
+}
+.sheet__cardx:hover { color: rgba(60, 46, 24, 0.82); }
+
+/* whose sheet this is (keeper's ruling): quiet at the head, tappable to be
+   called something else — a rename binds what comes after, never what is laid */
+/* worn as a chip, not underlined like a register: it is who signs the card, and
+   it stands apart at the head's far right. Tapping it opens the name page. */
+.sheet__who {
+  cursor: pointer;
+  font-size: 0.82em;
+  padding: 0.2em 0.7em;
+  border-radius: 999px;
+  border: 1px solid rgba(196, 154, 88, 0.5);
+  background: rgba(196, 154, 88, 0.12);
+  color: rgba(232, 220, 196, 0.85);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.sheet__who:hover { background: rgba(196, 154, 88, 0.22); color: rgba(240, 224, 190, 0.98); }
+
+/* the name page's rename row, and the quiet way back to the desk */
+.gate__you { display: flex; align-items: baseline; gap: 0.7em; margin: 0.2em 0 1em; }
+.gate__rename { max-width: 12em; }
+.gate__back { margin-top: 1.5em; opacity: 0.7; }
 
 /* a laptop that has claimed is shown its own line for a session; on a phone it
    is a quiet footnote nobody has to read */
@@ -954,6 +1162,17 @@ html.rig, html.rig body { cursor: none; }
 }
 
 .sheet__actions { display: flex; gap: 1.6em; align-items: baseline; justify-content: center; } /* the two doors stand centered (D114) */
+
+/* The phone is the castle's deposit device (D79/D179). Two things it needs that
+   a laptop does not: text at 16px, or iOS zooms the page the moment the pen
+   lands in a field; and a shorter editor, so the actions below it stay in reach
+   with the keyboard up. */
+@media (pointer: coarse) {
+  .sheet { font-size: 16px; }
+  .sheet__field { font-size: 1em; }
+  .editor { min-height: 6em; }
+  .editor .cm-scroller { max-height: 42dvh; }
+}
 
 .sheet__push { /* the door itself — it stands a little firmer (D99) */
   font-size: 1.02em;

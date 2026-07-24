@@ -98,15 +98,35 @@ async function main() {
   // The opening pass lays the whole stream before anything can be touched — and
   // the last event is the arrangement, which moves every studio at once. So wait
   // for the table to stop moving, not merely for the last card to arrive.
-  let cards = [];
+  // The threads between the last card and the arrangement move nothing, so "the
+  // cards stopped" is true for a moment BEFORE the map settles. Wait for all the
+  // cards, then for the big move the arrangement makes, and only then for
+  // stillness — else the pile opens against places the table is about to leave.
+  let base = null;
+  for (let i = 0; i < 70 && !base; i++) {
+    await sleep(1000);
+    const g = await geom();
+    if (g.length >= 81) base = g;
+  }
+  ok(base && base.length === 81, `the crowd surface laid ${base?.length} cards`);
+
+  // a model card turns to its 3D (D190): its back carries the mount and the
+  // render poster — the DOM wiring, checked without WebGL (GPU varies headless;
+  // the live turntable is drilled in the standalone model probe)
+  ok(await evalIn(`(() => {
+    const el = [...document.querySelectorAll('.card--model')].find((e) => e.querySelector('.card__back [data-model]'));
+    return !!el && el.querySelector('[data-model]').dataset.model.endsWith('.obj') && !!el.querySelector('.back__model-poster') && !el.querySelector('.back__front');
+  })()`), 'a model card carries its 3D mount and render poster, the flat render not repeated (D190)');
+  let cards = base;
   let still = 0;
-  for (let i = 0; i < 60 && still < 2; i++) {
+  let sawArrange = false;
+  for (let i = 0; i < 45 && still < 2; i++) {
     await sleep(1000);
     const now = await geom();
-    still = now.length >= 101 && JSON.stringify(now) === JSON.stringify(cards) ? still + 1 : 0;
+    if (now.some((c) => { const b = base.find((o) => o.id === c.id); return b && Math.hypot(c.x - b.x, c.y - b.y) > 80; })) sawArrange = true;
+    still = ((sawArrange || i >= 10) && JSON.stringify(now) === JSON.stringify(cards)) ? still + 1 : 0;
     cards = now;
   }
-  ok(cards.length === 101, `the crowd surface laid ${cards.length} cards`);
   await shot('0-laid');
 
   // a studio with a pile worth opening: the deepest stack on the table. A pile
@@ -249,7 +269,9 @@ async function main() {
   await click(away.x, away.y);
   ok(!(await evalIn(`document.querySelector('.keys').classList.contains('open')`)), 'and a tap anywhere else shuts it');
 
-  // and the wood puts everything back — a point inside the light with nothing on it
+  // and the wood puts everything back. One wood tap steps back one thing (D174),
+  // so the tap that shut the ? may already have closed the pile; tap again only
+  // if it is still open, since a wood tap on a closed table starts a scrub.
   const wood = await evalIn(`(() => {
     const f = document.getElementById('field');
     const r = f.getBoundingClientRect();
@@ -262,7 +284,8 @@ async function main() {
     return null;
   })()`);
   ok(wood, 'there is bare wood left to tap');
-  await click(wood.x, wood.y);
+  if (await evalIn(`document.getElementById('field').hasAttribute('data-reading')`)) await click(wood.x, wood.y);
+  await sleep(700); // let the close settle before measuring (MOVE_MS 620)
   await shot('3-closed');
   const back = await geom();
   const drift = spread.map((c) => {

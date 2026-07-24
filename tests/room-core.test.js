@@ -116,6 +116,59 @@ test('a card the stream will not take leaves no asset behind', () => {
   assert.equal(existsSync(assetDirIn(root)) ? readFileSync : true, true, 'no half-written deposit');
 });
 
+// ---- a follow-up: the maker links this card to one they already laid ----
+
+test('a follow-up lays the card, then a thread from the card it builds on (D145)', () => {
+  const { root } = fixture({ people: [{ name: 'R.', tokens: ['tok'] }] });
+  const r = depositHand(sheetCard(), {}, { root, author: 'R.', buildsOn: 'a-001' });
+
+  const log = lines(root).map((l) => JSON.parse(l));
+  assert.equal(log.length, 2, 'the card, then its thread — nothing else');
+  assert.equal(log[0].e, 'deposit');
+  assert.equal(log[0].artifact.id, r.id, 'the card is laid first, so the stream never sees a forward reference (D16)');
+  assert.deepEqual(
+    { e: log[1].e, from: log[1].from, to: log[1].to, why: log[1].why },
+    { e: 'thread', from: 'a-001', to: r.id, why: 'builds on' },
+    'the thread runs from the earlier card to the new one',
+  );
+  assert.equal(log[1].night, log[0].night, 'both sit on the current night');
+});
+
+test('a follow-up to a card that is not there refuses, and lays nothing', () => {
+  const { root } = fixture({ people: [{ name: 'R.', tokens: ['tok'] }] });
+  assert.match(words(() => depositHand(sheetCard(), {}, { root, author: 'R.', buildsOn: 'a-404' })), /no card a-404/);
+  assert.equal(lines(root).length, 0, 'a bad target left no card and no thread');
+});
+
+test('a follow-up to someone else’s card is refused — own work only (v1)', () => {
+  const { root } = fixture({ people: [{ name: 'E.', tokens: ['tok'] }] });
+  // E. tries to build on R.'s seeded quest a-001
+  const msg = words(() => depositHand({ ...sheetCard(), people: ['E.'] }, {}, { root, author: 'E.', buildsOn: 'a-001' }));
+  assert.match(msg, /not yours to build on/);
+  assert.equal(lines(root).length, 0);
+});
+
+test('a follow-up to a retired card is refused, and lays nothing', () => {
+  const root = mkdtempSync(join(tmpdir(), 'desk-room-'));
+  writeFileSync(join(root, 'seed.json'), JSON.stringify({
+    events: [
+      { e: 'deposit', night: 2, artifact: { id: 'a-001', media: 'note', kind: 'work', title: 'gone', people: ['R.'], provenance: 'curator', visibility: 'public', excerpt: { form: 'words', text: 'gone' } } },
+      { e: 'retire', night: 2, id: 'a-001' },
+    ],
+  }));
+  mkdirSync(join(root, 'drop'), { recursive: true });
+  writePeople(root, [{ name: 'R.', tokens: ['tok'] }]);
+  assert.match(words(() => depositHand(sheetCard(), {}, { root, author: 'R.', buildsOn: 'a-001' })), /was retired/);
+  assert.equal(lines(root).length, 0);
+});
+
+test('with no buildsOn the deposit is one line, exactly as before', () => {
+  const { root } = fixture({ people: [{ name: 'R.', tokens: ['tok'] }] });
+  depositHand(sheetCard(), {}, { root, author: 'R.' });
+  assert.equal(lines(root).length, 1, 'no follow-up, no thread');
+  assert.equal(JSON.parse(lines(root)[0]).e, 'deposit');
+});
+
 // ---- payloads beside the log, never inside it ----
 
 test('one blob used twice becomes one file — a piece and the door that summons it', () => {
@@ -282,8 +335,8 @@ test('a write from somewhere else is not a write from here', () => {
 // ---- the page opens signed ----
 
 test('a page opens with its own signature, and the signature alone is not a card', () => {
-  assert.equal(signedPage('E.'), '\n\n@E.', 'the name sits at the foot, the pen waits above it');
-  assert.equal(signedPage('  M.  '), '\n\n@M.');
+  assert.equal(signedPage('E.'), '\n@E.', 'the name sits just under the pen, not two lines below it');
+  assert.equal(signedPage('  M.  '), '\n@M.');
   assert.equal(signedPage(null), '', 'a desk that cannot say who is holding the sheet opens it blank');
   assert.equal(signedPage('   '), '');
 

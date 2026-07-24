@@ -4,3 +4,6 @@ drop/
 
 # private context, not for the public repo (budget figures, named invitees)
 *.pdf
+
+# source video — the site uses the compressed mountains.mp4
+*.MOV

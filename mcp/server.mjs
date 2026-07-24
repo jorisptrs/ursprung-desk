@@ -65,6 +65,7 @@ const INPUT = z.object({
     form: z.string().optional().describe('defaults from the media'),
   }).passthrough().optional(),
   detail: z.object({}).passthrough().optional().describe('the back — absent means the card does not open'),
+  builds_on: z.string().optional().describe('the id of one of your own cards this one continues — a follow-up, optional'),
 }).passthrough();
 
 export function createServer({ root = ROOT, author = null, remote = false } = {}) {

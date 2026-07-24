@@ -445,11 +445,25 @@ export function createDeskSink({ root = ROOT, prefix = 'm', warn = () => {} } = 
   return {
     // blobs — MCP: { excerpt: '<path on this machine>' }.
     //         hand: { 'piece:N': blob, experience: blob }, blob = { name, type, bytes }.
-    deposit(artifact, blobs = {}) {
+    deposit(artifact, blobs = {}, opts = {}) {
       const { stream } = readStream({ root, warn });
       const events = stream.all();
       const id = nextId(events, prefix);
       const night = highestNight(events);
+
+      // A follow-up links this card to one the maker already laid (buildsOn),
+      // validated here — before anything is appended — so a bad target refuses
+      // clean with no stray card. The thread itself is written after the deposit.
+      const buildsOn = isFilled(opts.buildsOn) ? opts.buildsOn.trim() : null;
+      if (buildsOn) {
+        const target = stream.artifact(buildsOn);
+        if (!target) throw new Refusal(`no card ${buildsOn} to build on`);
+        if (events.some((e) => e.e === 'retire' && e.id === buildsOn)) throw new Refusal(`${buildsOn} was retired — nothing to build on`);
+        // own work only (v1): the maker declares a fact about their own thread.
+        if (isFilled(opts.author) && !(Array.isArray(target.people) && target.people.includes(opts.author))) {
+          throw new Refusal(`${buildsOn} is not yours to build on`);
+        }
+      }
 
       let finished = { ...artifact, id, excerpt: { ...artifact.excerpt } };
       let trace = null; // what lands in drop/assets, once the stream has agreed
@@ -525,6 +539,15 @@ export function createDeskSink({ root = ROOT, prefix = 'm', warn = () => {} } = 
       }
       appendEvent(root, event);
 
+      // The follow-up link, now that both ends exist: a thread the maker
+      // authored, not the curator (D145). Appended after the card it points at,
+      // so the stream never sees a forward reference (D16).
+      if (buildsOn) {
+        const thread = { e: 'thread', night, from: buildsOn, to: id, why: 'builds on' };
+        stream.append(thread); // validates: both ends present, no self-reference
+        appendEvent(root, thread);
+      }
+
       return { id, night, event };
     },
   };
@@ -572,7 +595,10 @@ export function depositCard(input, { root = ROOT, warn = () => {}, sink = null, 
   }
 
   const door = sink ?? createDeskSink({ root, warn });
-  return door.deposit(artifact, isFilled(path) ? { excerpt: realpathSync(path) } : {});
+  // buildsOn is a deposit instruction, not an artifact field (buildArtifact never
+  // copies it), so the stream never sees it — the sink turns it into a thread.
+  const buildsOn = input?.builds_on ?? input?.buildsOn ?? null;
+  return door.deposit(artifact, isFilled(path) ? { excerpt: realpathSync(path) } : {}, { buildsOn, author });
 }
 
 // ---- the hand door, over the LAN ----
@@ -581,7 +607,7 @@ export function depositCard(input, { root = ROOT, warn = () => {}, sink = null, 
 // MCP door there is nothing to build here — only to refuse. The client is
 // never trusted: the fields the desk owns are refused rather than honoured,
 // the door names itself, and the stream remains the sole judge of shape (D107).
-export function depositHand(artifact, blobs = {}, { root = ROOT, warn = () => {}, sink = null, author = null } = {}) {
+export function depositHand(artifact, blobs = {}, { root = ROOT, warn = () => {}, sink = null, author = null, buildsOn = null } = {}) {
   if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) throw new Refusal('a card is an object');
   const owned = refuseOwnedFields(artifact, HAND_OWNED);
   if (owned) throw new Refusal(owned);
@@ -602,5 +628,5 @@ export function depositHand(artifact, blobs = {}, { root = ROOT, warn = () => {}
   if (!isFilled(signed.caption) && signed.people.every(isFilled)) signed.caption = signed.people.join(' + ');
 
   const door = sink ?? createDeskSink({ root, prefix: 'h', warn });
-  return door.deposit(signed, blobs);
+  return door.deposit(signed, blobs, { buildsOn, author });
 }

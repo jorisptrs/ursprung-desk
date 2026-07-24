@@ -210,6 +210,46 @@ export function arrange(people, pairs = [], previous = {}, { steps = STEPS, drif
   return places;
 }
 
+// A pile opened around its own name (D192, amends D161): the cards bloom out
+// from the place the pile stood on and stay centred there — close enough to
+// read, no reflow into a row elsewhere — and the studio's name, at the centre,
+// shows through the gap they leave. The name is slotted into the middle of the
+// reading order as a cell of its own; the cards lay out around it in order, and
+// the whole cluster is then shifted so that empty cell sits at the origin, which
+// is where the name is written. Sizes in (+ a `hole` for the name), offsets from
+// the name out — one per card, in order. Pure — no DOM, no clock.
+export function spreadAround(sizes, gap = 8, hole = { w: 0, h: 0 }) {
+  const list = (sizes ?? []).filter((s) => s && s.w > 0 && s.h > 0);
+  const n = list.length;
+  if (!n) return { offsets: [], w: 0, h: 0 };
+  const cells = list.map((s) => ({ w: s.w, h: s.h, hole: false }));
+  cells.splice(Math.floor(n / 2), 0, { w: hole.w, h: hole.h, hole: true }); // the name's cell, mid reading-order
+  const m = cells.length;
+  const cols = Math.max(1, Math.min(m, Math.round(Math.sqrt(m * 1.6)))); // squarish, a touch wide, so it stays near the name
+  const rows = [];
+  for (let i = 0; i < m; i += cols) rows.push(cells.slice(i, i + cols));
+  const rowW = rows.map((r) => r.reduce((s, c) => s + c.w, 0) + gap * (r.length - 1));
+  const rowH = rows.map((r) => Math.max(...r.map((c) => c.h)));
+  const h = rowH.reduce((a, b) => a + b, 0) + gap * (rows.length - 1);
+  const w = Math.max(...rowW);
+  const raw = [];
+  let hx = 0;
+  let hy = 0;
+  let y = -h / 2;
+  rows.forEach((row, ri) => {
+    let x = -rowW[ri] / 2;
+    for (const c of row) {
+      const pos = { dx: x + c.w / 2, dy: y + rowH[ri] / 2, hole: c.hole };
+      if (c.hole) { hx = pos.dx; hy = pos.dy; } else raw.push(pos);
+      x += c.w + gap;
+    }
+    y += rowH[ri] + gap;
+  });
+  // put the name's empty cell at the origin, so the name is what shows there
+  const offsets = raw.map((o) => ({ dx: o.dx - hx, dy: o.dy - hy }));
+  return { offsets, w, h };
+}
+
 // A pile opened under a hand (D144/D161): every card shown whole, a thin margin
 // between them, and no more room taken than that needs. The order is the order
 // they were made, reading left to right and top to bottom, so opening a studio

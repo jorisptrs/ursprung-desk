@@ -22,7 +22,7 @@ import { dirname, join } from 'node:path';
 import express from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
-import { appendEvent, createDeskSink, depositHand, dropFileIn, isMainModule, MAX_ASSET_BYTES, Refusal, ROOT } from './core.mjs';
+import { appendEvent, createDeskSink, depositHand, dropFileIn, isMainModule, MAX_ASSET_BYTES, readStream, Refusal, ROOT } from './core.mjs';
 import { createServer as createDeskMcp } from './server.mjs';
 
 export const DEFAULT_PORT = 8080; // under 1024 needs root on macOS, and a QR hides a port anyway
@@ -95,6 +95,26 @@ const UNKNOWN = 'this desk does not know that device — scan the desk’s code 
 // same one. Tokens are never in here; they are a way in, not a fact about
 // anyone, and they never leave this machine.
 export const roster = (root = ROOT) => readPeople(root).map((p) => p.name);
+
+// The cards a person laid and still has on the table — the picker's stock. Read
+// from the log the same way the table is, retired ids dropped so nobody builds on
+// a card that is gone. Each card carries what its FACE needs — the picker draws it
+// as it lies on the table (D163), front only, so the back and its bytes stay home.
+export function myCards(root = ROOT, name) {
+  if (!name) return [];
+  const { stream } = readStream({ root });
+  const events = stream.all();
+  const retired = new Set(events.filter((e) => e.e === 'retire').map((e) => e.id));
+  const cards = [];
+  for (const e of events) {
+    if (e.e !== 'deposit') continue;
+    const a = e.artifact;
+    if (!a || retired.has(a.id)) continue;
+    if (!Array.isArray(a.people) || !a.people.includes(name)) continue;
+    cards.push({ id: a.id, media: a.media, kind: a.kind, title: a.title, caption: a.caption, people: a.people, excerpt: a.excerpt });
+  }
+  return cards;
+}
 
 // Tapping your own name on a device. A person may claim on as many devices as
 // they carry; each gets its own token, all of them the same person.
@@ -222,6 +242,20 @@ export function createRoom({ root = ROOT, port = DEFAULT_PORT } = {}) {
     res.json({ name: who?.name ?? null, people: roster(root) });
   });
 
+  // The token-holder's own cards, for the sheet's "builds on…" picker. Own work
+  // only (v1): a person lays a follow-up to a card they already laid, so the
+  // list is theirs alone — someone else's cards never appear here. Needs the
+  // token, like a write; a device the desk does not know gets nothing.
+  app.get('/mine', (req, res) => {
+    const who = whoIs(root, req.get('x-desk-token') ?? req.query.t);
+    res.set('Cache-Control', 'no-store');
+    if (!who) {
+      res.status(403).json({ refused: UNKNOWN });
+      return;
+    }
+    res.json({ name: who.name, cards: myCards(root, who.name) });
+  });
+
   // Tapping your own name. The device is handed a token and remembers it, so
   // this happens once per device rather than once per card.
   app.post('/claim', writeGuard, express.json({ limit: '16kb' }), (req, res) => {
@@ -255,7 +289,7 @@ export function createRoom({ root = ROOT, port = DEFAULT_PORT } = {}) {
     try {
       const blobs = decodeBlobs(req.body?.blobs);
       const { id } = depositHand(req.body?.artifact, blobs, {
-        root, warn, author: who.name, sink: createDeskSink({ root, prefix: 'h', warn }),
+        root, warn, author: who.name, buildsOn: req.body?.buildsOn, sink: createDeskSink({ root, prefix: 'h', warn }),
       });
       say(`${id} · laid — ${who.name}, by hand`);
       res.json({ laid: id });
@@ -308,6 +342,10 @@ export function createRoom({ root = ROOT, port = DEFAULT_PORT } = {}) {
   file('/desk.css', 'desk.css');
   file('/desk.js', 'desk.js');
   file('/seed.json', 'seed.json');
+  // alternate seeds the table may be pointed at with ?seed= (a demo set); listed
+  // by name, like everything else the room serves, so nothing else in root leaks
+  file('/seed-mocks.json', 'seed-mocks.json');
+  file('/seed-demo.json', 'seed-demo.json');
   // the log the table watches: always the file as it is on disk, never a copy
   // a proxy or a browser kept (D105)
   app.get('/drop/stream.jsonl', (req, res) => {

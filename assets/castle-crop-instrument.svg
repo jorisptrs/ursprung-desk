@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 460">
+  <defs>
+    <linearGradient id="brass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4a4038"/>
+      <stop offset="1" stop-color="#22201c"/>
+    </linearGradient>
+    <radialGradient id="instv" cx="0.5" cy="0.45" r="0.7">
+      <stop offset="0.55" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.38"/>
+    </radialGradient>
+  </defs>
+  <rect width="640" height="460" fill="url(#brass)"/>
+  <g stroke="#c9a86a" stroke-width="2.5" fill="none" opacity="0.7">
+    <path d="M120 70 L120 380 M175 70 L175 380 M230 70 L230 380 M285 70 L285 380 M340 70 L340 380 M395 70 L395 380 M450 70 L450 380 M505 70 L505 380"/>
+  </g>
+  <g stroke="#8a6f42" stroke-width="9" opacity="0.85">
+    <path d="M90 120 L540 118"/>
+    <path d="M90 340 L540 342"/>
+  </g>
+  <rect width="640" height="460" fill="url(#instv)"/>
+</svg>

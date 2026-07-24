@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 460">
+  <defs>
+    <linearGradient id="stone" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9a8f7a"/>
+      <stop offset="0.5" stop-color="#7d735f"/>
+      <stop offset="1" stop-color="#5b5344"/>
+    </linearGradient>
+    <radialGradient id="wallv" cx="0.5" cy="0.5" r="0.75">
+      <stop offset="0.55" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.32"/>
+    </radialGradient>
+  </defs>
+  <rect width="640" height="460" fill="url(#stone)"/>
+  <g stroke="#4a4436" stroke-width="1" opacity="0.4" fill="none">
+    <path d="M0 118 H640 M0 246 H640 M0 352 H640"/>
+    <path d="M150 0 V118 M410 0 V118 M70 118 V246 M300 118 V246 M520 118 V246 M200 246 V352 M470 246 V352"/>
+  </g>
+  <g fill="#6f7a4e" opacity="0.5">
+    <circle cx="205" cy="180" r="26"/>
+    <circle cx="235" cy="196" r="18"/>
+    <circle cx="188" cy="205" r="14"/>
+    <circle cx="470" cy="300" r="20"/>
+    <circle cx="452" cy="288" r="11"/>
+  </g>
+  <g fill="#b9a05f" opacity="0.35">
+    <circle cx="360" cy="90" r="15"/>
+    <circle cx="380" cy="100" r="9"/>
+  </g>
+  <rect width="640" height="460" fill="url(#wallv)"/>
+</svg>

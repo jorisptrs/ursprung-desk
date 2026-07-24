@@ -1,0 +1,475 @@
+{
+  "events": [
+    {
+      "e": "arrange",
+      "night": 0,
+      "why": "each hand a corner, the shared work between them",
+      "places": {
+        "J.": [
+          0.22,
+          0.28
+        ],
+        "Claude": [
+          0.13,
+          0.85
+        ],
+        "C.": [
+          0.82,
+          0.3
+        ],
+        "J. + R.": [
+          0.3,
+          0.58
+        ],
+        "C. + R.": [
+          0.8,
+          0.62
+        ],
+        "R.": [
+          0.52,
+          0.82
+        ]
+      }
+    },
+    {
+      "e": "roster",
+      "night": 0,
+      "people": [
+        "J.",
+        "R.",
+        "C.",
+        "Claude"
+      ]
+    },
+    {
+      "e": "deposit",
+      "night": 0,
+      "artifact": {
+        "id": "a-001",
+        "media": "image",
+        "kind": "quest",
+        "title": "fold a realistic origami crane",
+        "people": [
+          "J."
+        ],
+        "provenance": "curator",
+        "visibility": "public",
+        "excerpt": {
+          "form": "crop",
+          "src": "assets/or0-q0.jpg"
+        }
+      }
+    },
+    {
+      "e": "deposit",
+      "night": 0,
+      "artifact": {
+        "id": "a-002",
+        "media": "image",
+        "kind": "work",
+        "title": "the crane, day one",
+        "people": [
+          "J."
+        ],
+        "provenance": "hand",
+        "visibility": "public",
+        "excerpt": {
+          "form": "crop",
+          "src": "assets/or0-w0-1.jpeg"
+        },
+        "detail": {
+          "composition": [
+            {
+              "t": "image",
+              "src": "assets/or0-q1-0.jpeg",
+              "name": "crease pattern"
+            }
+          ],
+          "note": "off to a good start, but the model had thinner extremities. Looking to get the neck thinner."
+        }
+      }
+    },
+    {
+      "e": "deposit",
+      "night": 1,
+      "artifact": {
+        "id": "a-003",
+        "media": "image",
+        "kind": "work",
+        "title": "the crane, finished",
+        "people": [
+          "J."
+        ],
+        "provenance": "hand",
+        "visibility": "public",
+        "excerpt": {
+          "form": "crop",
+          "src": "assets/or0-q1-1.jpeg"
+        },
+        "detail": {
+          "composition": [
+            {
+              "t": "image",
+              "src": "assets/or0-w0-0.jpeg",
+              "name": "crease pattern, updated"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "e": "deposit",
+      "night": 1,
+      "artifact": {
+        "id": "a-004",
+        "media": "note",
+        "kind": "quest",
+        "title": "invent an origami darth vader",
+        "people": [
+          "R.",
+          "J."
+        ],
+        "provenance": "curator",
+        "visibility": "public",
+        "excerpt": {
+          "form": "words",
+          "text": "invent an origami darth vader"
+        }
+      }
+    },
+    {
+      "e": "deposit",
+      "night": 1,
+      "artifact": {
+        "id": "a-005",
+        "media": "image",
+        "kind": "work",
+        "title": "darth vader, folded",
+        "caption": "Finished the origami darth vader this morning.",
+        "people": [
+          "R.",
+          "J."
+        ],
+        "provenance": "hand",
+        "visibility": "public",
+        "excerpt": {
+          "form": "crop",
+          "src": "assets/or1-w0.JPG"
+        }
+      }
+    },
+    {
+      "e": "thread",
+      "night": 1,
+      "from": "a-003",
+      "to": "a-005",
+      "why": "both folded from one square"
+    },
+    {
+      "e": "deposit",
+      "night": 1,
+      "artifact": {
+        "id": "a-006",
+        "media": "note",
+        "kind": "quest",
+        "title": "write a Haiku with Anthropic’s Haiku",
+        "people": [
+          "J."
+        ],
+        "provenance": "curator",
+        "visibility": "public",
+        "excerpt": {
+          "form": "words",
+          "text": "write a Haiku with Anthropic’s Haiku"
+        }
+      }
+    },
+    {
+      "e": "deposit",
+      "night": 2,
+      "artifact": {
+        "id": "a-007",
+        "media": "text",
+        "kind": "work",
+        "title": "Prompted Haiku on the meaning of death",
+        "people": [
+          "J.",
+          "Claude"
+        ],
+        "provenance": "mcp",
+        "visibility": "public",
+        "excerpt": {
+          "form": "sentence",
+          "text": "Breath returns to earth\nWhat we built outlives the self\nThe loop closes soft"
+        }
+      }
+    },
+    {
+      "e": "deposit",
+      "night": 2,
+      "artifact": {
+        "id": "a-009",
+        "media": "text",
+        "kind": "work",
+        "title": "Prompted Haiku on the meaning of life",
+        "people": [
+          "J.",
+          "Claude"
+        ],
+        "provenance": "mcp",
+        "visibility": "public",
+        "excerpt": {
+          "form": "sentence",
+          "text": "Build, create, then rest—\nThe meaning blooms through the work.\nDust to dust again."
+        }
+      }
+    },
+    {
+      "e": "thread",
+      "night": 2,
+      "from": "a-007",
+      "to": "a-009",
+      "why": "one session, two prompts"
+    },
+    {
+      "e": "deposit",
+      "night": 2,
+      "artifact": {
+        "id": "a-008",
+        "media": "note",
+        "kind": "failure",
+        "people": [
+          "J."
+        ],
+        "provenance": "hand",
+        "visibility": "public",
+        "excerpt": {
+          "form": "words",
+          "text": "Haiku proceeds with surprising caution when prompted to generate creative outputs"
+        }
+      }
+    },
+    {
+      "e": "deposit",
+      "night": 2,
+      "artifact": {
+        "id": "a-010",
+        "media": "note",
+        "kind": "quest",
+        "title": "learn to paint trees with watercolor",
+        "people": [
+          "R."
+        ],
+        "provenance": "curator",
+        "visibility": "public",
+        "excerpt": {
+          "form": "words",
+          "text": "learn to paint trees with watercolor"
+        }
+      }
+    },
+    {
+      "e": "deposit",
+      "night": 2,
+      "artifact": {
+        "id": "a-011",
+        "media": "image",
+        "kind": "quest",
+        "caption": "Anybody help",
+        "people": [
+          "R."
+        ],
+        "provenance": "curator",
+        "visibility": "public",
+        "excerpt": {
+          "form": "crop",
+          "src": "assets/wc-q0.JPG"
+        }
+      }
+    },
+    {
+      "e": "deposit",
+      "night": 2,
+      "artifact": {
+        "id": "a-012",
+        "media": "image",
+        "kind": "work",
+        "title": "trees, in watercolor",
+        "people": [
+          "R.",
+          "C."
+        ],
+        "provenance": "hand",
+        "visibility": "public",
+        "excerpt": {
+          "form": "crop",
+          "src": "assets/wc-w0.JPG"
+        },
+        "detail": {
+          "composition": [
+            {
+              "t": "image",
+              "src": "assets/wc-w1.JPG"
+            },
+            {
+              "t": "image",
+              "src": "assets/wc-w2.JPG"
+            },
+            {
+              "t": "image",
+              "src": "assets/wc-w3.JPG"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "e": "thread",
+      "night": 2,
+      "from": "a-011",
+      "to": "a-012",
+      "why": "the help arrived"
+    },
+    {
+      "e": "deposit",
+      "night": 3,
+      "artifact": {
+        "id": "a-013",
+        "media": "note",
+        "kind": "quest",
+        "title": "Record a vivid moment at this retreat",
+        "people": [
+          "C."
+        ],
+        "provenance": "curator",
+        "visibility": "public",
+        "excerpt": {
+          "form": "words",
+          "text": "Record a vivid moment at this retreat"
+        }
+      }
+    },
+    {
+      "e": "deposit",
+      "night": 3,
+      "artifact": {
+        "id": "a-014",
+        "media": "video",
+        "kind": "work",
+        "caption": "A lonely tractor in Austria",
+        "people": [
+          "C."
+        ],
+        "provenance": "hand",
+        "visibility": "public",
+        "excerpt": {
+          "form": "frames",
+          "src": "assets/mountains-strip.jpg"
+        },
+        "detail": {
+          "note": "Sufficiently vivid",
+          "experience": {
+            "mode": "play",
+            "src": "assets/mountains.mp4"
+          }
+        }
+      }
+    },
+    {
+      "e": "deposit",
+      "night": 3,
+      "artifact": {
+        "id": "a-015",
+        "media": "note",
+        "kind": "quest",
+        "title": "Code a Claude desk for Ursprung V",
+        "people": [
+          "C."
+        ],
+        "provenance": "curator",
+        "visibility": "public",
+        "excerpt": {
+          "form": "words",
+          "text": "Code a Claude desk for Ursprung V"
+        }
+      }
+    },
+    {
+      "e": "deposit",
+      "night": 3,
+      "artifact": {
+        "id": "a-016",
+        "media": "note",
+        "kind": "quest",
+        "title": "looking how to easily deploy it",
+        "people": [
+          "C.",
+          "Claude"
+        ],
+        "provenance": "mcp",
+        "visibility": "public",
+        "excerpt": {
+          "form": "words",
+          "text": "looking how to easily deploy it"
+        },
+        "detail": {
+          "links": [
+            "https://github.com/jorisptrs/ursprung-desk"
+          ]
+        }
+      }
+    },
+    {
+      "e": "deposit",
+      "night": 3,
+      "artifact": {
+        "id": "a-018",
+        "media": "model",
+        "kind": "work",
+        "title": "a fold, drawn",
+        "caption": "wireframe · flat-foldable",
+        "people": [
+          "Claude"
+        ],
+        "provenance": "mcp",
+        "visibility": "public",
+        "excerpt": {
+          "form": "render",
+          "src": "assets/model-fold-render.svg"
+        },
+        "detail": {
+          "experience": {
+            "mode": "play",
+            "src": "assets/model-fold.obj"
+          }
+        }
+      }
+    },
+    {
+      "e": "deposit",
+      "night": 4,
+      "artifact": {
+        "id": "a-017",
+        "media": "note",
+        "kind": "meta",
+        "title": "the desk, deployed",
+        "people": [
+          "C.",
+          "R.",
+          "Claude"
+        ],
+        "provenance": "curator",
+        "visibility": "public",
+        "excerpt": {
+          "form": "words",
+          "text": "deployed a demo via Github Pages, nice!"
+        },
+        "detail": {
+          "links": [
+            "https://jorisptrs.github.io/ursprung-desk/"
+          ]
+        }
+      }
+    }
+  ]
+}

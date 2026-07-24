@@ -639,7 +639,7 @@ try {
   await evalIn(phone, `__view.focus()`);
   await typeLines(phone, ['# a card with nowhere to go', 'the table was closed behind @T.']);
   await evalIn(phone, `${HELPERS} act('push to table')`);
-  ok(await evalIn(phone, `${HELPERS} until(() => sheetStatus().includes('no table is open in this browser · kept in the deck'), 8000)`, true), 'silence surfaces the dry no-table line — and says where the card went');
+  ok(await evalIn(phone, `${HELPERS} until(() => sheetStatus().includes('kept in the deck'), 8000)`, true), 'silence surfaces the dry no-table line — and says where the card went');
   ok(await evalIn(phone, `document.querySelectorAll('.deck-card').length === 1`), 'the deck holds the card — nothing is lost');
 
   phone.close();

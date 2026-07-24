@@ -42,42 +42,67 @@
       if (res.ok) { room = true; ({ name: me, people } = await res.json()); }
     } catch { /* not the room's server: the published page, or it is not answering */ }
 
-    // A device the room does not know yet meets the cohort first.
-    if (room && !me) {
-      ({ token, name: me } = await claimGate({
-        people,
-        onClaim: async (name) => {
-          const res = await ask('/claim', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ name }),
-          });
-          const body = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(body.refused ?? 'the desk did not take that');
-          return body;
-        },
-      }));
-      keep(token);
-    }
-
-    const onRename = room && me ? async (name) => {
-      const res = await ask('/rename', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name }),
+    // The two ways to be someone at this desk, used by the name page below.
+    const claimFn = async (name) => {
+      const res = await ask('/claim', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.refused ?? 'the desk did not take that');
-      people = (await (await ask('/whoami')).json()).people ?? people;
+      return body; // { token, name }
+    };
+    const renameFn = async (name) => {
+      const res = await ask('/rename', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.refused ?? 'the desk did not take that');
+      try { people = (await (await ask('/whoami')).json()).people ?? people; } catch { /* keep the list we have */ }
       return body.name;
+    };
+
+    // The name page: a device the room does not know yet meets the cohort first;
+    // a known device reaches the SAME page from the sheet (?manage) to become
+    // someone else or be called something new — one page, both doors.
+    const manage = new URLSearchParams(location.search).has('manage');
+    if (room && (!me || manage)) {
+      const got = await claimGate({
+        people, token,
+        me: manage ? me : null,
+        onClaim: claimFn,
+        onRename: (manage && me) ? renameFn : null,
+      });
+      token = got.token; me = got.name; keep(token);
+      if (manage) history.replaceState(null, '', location.pathname); // drop ?manage so a reload does not re-open it
+    }
+
+    // From the sheet, tapping your name comes back here — the token is kept, so
+    // the page knows who you are and can rename as well as switch.
+    const onSwitchName = room ? () => {
+      location.href = location.origin + location.pathname + '?manage';
     } : null;
 
+    // The "builds on…" picker's stock: this device's own cards, asked of the room
+    // each time it opens so a card just laid is already there to follow. Only the
+    // room knows them; the published page has no such door, so the picker hides.
+    const myCards = room && token
+      ? async () => {
+          try {
+            const res = await ask('/mine');
+            return res.ok ? ((await res.json()).cards ?? []) : [];
+          } catch { return []; }
+        }
+      : null;
+
     const sink = token ? httpSink(location.origin, token) : broadcastSink();
-    openSheet({ mode: 'page', container: document.body, sink, me, people, onRename });
+    openSheet({ mode: 'page', container: document.body, sink, me, people, onSwitchName, myCards });
 
     // A laptop that has claimed is shown its own line, once, below the sheet —
-    // ignorable on a phone, and exactly what is wanted where a session lives.
-    if (room && token) {
+    // the MCP door, for a Claude session on this machine. It is meaningless on a
+    // phone (nothing there to paste it into), so it appears only where a pointer
+    // can hover — a laptop or desktop — and never on the touch device that only
+    // ever wants the hand door above (D179).
+    if (room && token && matchMedia('(hover: hover)').matches) {
       const line = document.createElement('div');
       line.className = 'sheet__mcpline';
       line.textContent = `claude mcp add desk --transport http ${location.origin}/mcp/${token}`;
