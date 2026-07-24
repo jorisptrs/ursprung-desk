@@ -12,6 +12,20 @@ BRIEF.md is the source of intent. This file records how its ambiguities were rul
 **Test:** `node --test` (or `npm test`) from the repo root — dev-only, nothing in `tests/` or `package.json` ships. The MCP protocol suite skips itself until `mcp/npm install` has run. Two CDP end-to-end drives, neither part of `npm test`, both wanting the server up: `node tests/hand-e2e.mjs` (~60 s) and `node tests/mcp-e2e.mjs` (~40 s, also wants `mcp/node_modules`).
 **License:** code under MIT (see LICENSE); `vendor/codemirror.js` is CodeMirror 6, MIT, © Marijn Haverbeke and contributors (versions and the one-shot build recipe in its banner — the repo itself has no build step). Media in `assets/` and the seeded content are demonstration stand-ins, not licensed for reuse.
 
+## What the desk is
+
+A shared desk for a four-day creative retreat, where the work of the days collects and connects. People work on what they like and, when they want to show something, push it onto the desk — a **work** (finished or half-done, any format from a recording to a 3D model), a **quest** (an intention, or a request for help), or a **note on Claude** (where it helped, or where it fell short). Each person's cards gather into their own pile beside everyone else's, to be walked past or opened on a device, so collaborations start across disciplines.
+
+**Three doors onto the desk.** A phone or other device on the room wifi (scan the shared QR, make a card, push it); a Claude session over MCP ("put this on the desk", then confirm the preview); or a curator placing what people hand over on paper, so anyone may stay analog.
+
+**What Claude contributes, and signs.** It works *inside* a card as a collaborator — a card marked *E. + Claude* is E.'s work with Claude's help — and it keeps *the map*: captions, proposed connections between related works, and a short note each night on what it saw across the studios, being the only participant in every studio at once. No solo Claude creations; the role is to enhance the retreat.
+
+**Kept safe.** A per-card consent tier — `retreat` never leaves the room, `community` is visible across the wider community, `public` may be published. Nothing is captured automatically: the desk receives placements, it does not watch. Failures stay on the table as notes on Claude, and anyone may do the retreat without using Claude or the desk at all.
+
+**Across the event.** Quests seed the desk live on the opening night; morning syncs review what Claude proposed overnight; the desk is one more studio on the closing walk; and the four days replay in ninety seconds at the end. Later, a one-way export of only the consented cards could publish the desk as an "after movie" or interactive viewer, and the notes on Claude could inform how the work is framed and funded.
+
+**The rig, and what's left.** A laptop runs the desk and drives a display — either a lamp casting down onto a slightly inclined table with an infrared touch frame, so cards open by hand, or a large touchscreen (to be decided). Today: a working v0 with the frontend, deposits over same-wifi devices and Claude (MCP), and the replays. Left to decide together: Claude's suggestions for who is on a similar problem, the per-card consent picker, a curator dashboard, further UX, and building the rig.
+
 ## Decisions log
 
 - D1 · (superseded 2026-07-22 by D87 — the table no longer moves) Motion between events: the table is truly still at rest; each arrival nudges existing cards slightly edgeward, furniture-slow, then stillness again — strata are physically earned, no ambient drift.
